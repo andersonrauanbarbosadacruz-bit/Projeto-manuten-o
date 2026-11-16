@@ -264,14 +264,16 @@ export const FuelingSection: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowConfigModal(true)}
-            className="min-h-[42px] inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-xs font-bold cursor-pointer"
-          >
-            <Settings className="w-4 h-4 text-emerald-700" />
-            <span>Parâmetros (Mín / Méd / Máx)</span>
-          </button>
+          {userRole === 'ADMIN' && (
+            <button
+              type="button"
+              onClick={() => setShowConfigModal(true)}
+              className="min-h-[42px] inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-xs font-bold cursor-pointer"
+            >
+              <Settings className="w-4 h-4 text-emerald-700" />
+              <span>Parâmetros (Mín / Méd / Máx)</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -662,12 +664,14 @@ export const FuelingSection: React.FC = () => {
         </div>
       )}
 
-      {/* Consumption Config Modal */}
-      <FuelConsumptionConfigModal
-        isOpen={showConfigModal}
-        onClose={() => setShowConfigModal(false)}
-        initialPlate={plateFilter || undefined}
-      />
+      {/* Consumption Config Modal (Admin only) */}
+      {userRole === 'ADMIN' && (
+        <FuelConsumptionConfigModal
+          isOpen={showConfigModal}
+          onClose={() => setShowConfigModal(false)}
+          initialPlate={plateFilter || undefined}
+        />
+      )}
 
       {/* Plate-Scoped Correction Modal (shows ONLY logs of that exact plate) */}
       <FuelPlateCorrectionModal

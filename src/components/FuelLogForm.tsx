@@ -464,14 +464,16 @@ export const FuelLogForm: React.FC<FuelLogFormProps> = ({
               <span>Histórico de {plate} ({selectedPlateHistory.length})</span>
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setShowConfigModal(true)}
-            className="min-h-[40px] inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 text-xs font-bold cursor-pointer"
-          >
-            <Settings className="w-3.5 h-3.5 text-emerald-700" />
-            <span>Definir Consumo (Mín/Méd/Máx)</span>
-          </button>
+          {userRole === 'ADMIN' && (
+            <button
+              type="button"
+              onClick={() => setShowConfigModal(true)}
+              className="min-h-[40px] inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 text-xs font-bold cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Definir Consumo (Mín/Méd/Máx)</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -851,11 +853,13 @@ export const FuelLogForm: React.FC<FuelLogFormProps> = ({
       </form>
 
       {/* Modals */}
-      <FuelConsumptionConfigModal
-        isOpen={showConfigModal}
-        onClose={() => setShowConfigModal(false)}
-        initialPlate={plate}
-      />
+      {userRole === 'ADMIN' && (
+        <FuelConsumptionConfigModal
+          isOpen={showConfigModal}
+          onClose={() => setShowConfigModal(false)}
+          initialPlate={plate}
+        />
+      )}
 
       <FuelPlateCorrectionModal
         isOpen={showCorrectionModal}

@@ -16,6 +16,7 @@ export const FuelConsumptionConfigModal: React.FC<FuelConsumptionConfigModalProp
   initialPlate
 }) => {
   const {
+    userRole,
     vehicles,
     fuelLogs,
     fuelConsumptionRules,
@@ -111,7 +112,7 @@ export const FuelConsumptionConfigModal: React.FC<FuelConsumptionConfigModalProp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, initialCleanPlate]);
 
-  if (!isOpen) return null;
+  if (!isOpen || userRole !== 'ADMIN') return null;
 
   const allSelected =
     configurablePlates.length > 0 &&
