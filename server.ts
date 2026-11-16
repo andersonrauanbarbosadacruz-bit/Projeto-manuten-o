@@ -110,10 +110,10 @@ function saveDatabase() {
       const snapshotPath = path.join(BACKUP_DIR, `snapshot_${dateStr}.json`);
       fs.writeFileSync(snapshotPath, serialized, 'utf-8');
 
-      // Keep latest 20 snapshots
+      // Keep latest 2 snapshots to prevent publish bundle bloat
       try {
         const snapshots = fs.readdirSync(BACKUP_DIR).filter(f => f.startsWith('snapshot_')).sort();
-        while (snapshots.length > 20) {
+        while (snapshots.length > 2) {
           const oldest = snapshots.shift();
           if (oldest) fs.unlinkSync(path.join(BACKUP_DIR, oldest));
         }
