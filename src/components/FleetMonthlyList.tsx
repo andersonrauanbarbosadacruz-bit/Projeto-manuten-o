@@ -22,13 +22,15 @@ import {
   SlidersHorizontal,
   ChevronDown,
   ClipboardCheck,
-  Plane
+  Plane,
+  Fuel
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { FARMS, Farm, VehicleMonthlyUpdate, Vehicle, ChecklistRecord } from '../types';
 import { getChecklistEffectiveStatus } from '../utils/complianceHelper';
 import { exportChecklistToPdf } from '../utils/pdfGenerator';
 import { downloadChecklistDocument } from '../utils/documentDownloader';
+import { FuelingSection } from './FuelingSection';
 
 export const FleetMonthlyList: React.FC = () => {
   const { 
@@ -43,12 +45,13 @@ export const FleetMonthlyList: React.FC = () => {
     setActiveTab,
     startNewFleetAction,
     vehicles,
+    fuelLogs,
+    fleetListTab: listTab,
+    setFleetListTab: setListTab,
     userRole,
     requestDelete,
     setShowVehicleModal
   } = useApp() as any;
-
-  const [listTab, setListTab] = useState<'UPDATES' | 'CHECKLISTS' | 'DRONES'>('UPDATES');
 
   // Search & Basic Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -364,6 +367,14 @@ export const FleetMonthlyList: React.FC = () => {
           </button>
 
           <button
+            onClick={() => startNewFleetAction('FUEL')}
+            className="inline-flex items-center justify-center space-x-1.5 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs sm:text-sm font-bold shadow-md transition-all active:scale-95 cursor-pointer shrink-0"
+          >
+            <Fuel className="w-4 h-4 text-emerald-200" />
+            <span>+ Abastecimento</span>
+          </button>
+
+          <button
             onClick={() => startNewFleetAction('DRONE')}
             className="inline-flex items-center justify-center space-x-1.5 px-4 py-2.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white text-xs sm:text-sm font-bold shadow-md transition-all active:scale-95 cursor-pointer shrink-0"
           >
@@ -411,6 +422,24 @@ export const FleetMonthlyList: React.FC = () => {
 
         <button
           type="button"
+          onClick={() => setListTab('FUEL')}
+          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center space-x-2 shrink-0 cursor-pointer ${
+            listTab === 'FUEL'
+              ? 'bg-emerald-700 text-white shadow-md ring-2 ring-emerald-500/30'
+              : 'bg-white text-slate-700 border border-slate-200 hover:bg-emerald-50 hover:text-emerald-900'
+          }`}
+        >
+          <Fuel className={`w-4 h-4 ${listTab === 'FUEL' ? 'text-emerald-200' : 'text-emerald-700'}`} />
+          <span>Abastecimentos</span>
+          <span className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
+            listTab === 'FUEL' ? 'bg-emerald-900 text-emerald-100' : 'bg-slate-100 text-slate-600'
+          }`}>
+            {(fuelLogs || []).length}
+          </span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setListTab('CHECKLISTS')}
           className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center space-x-2 shrink-0 cursor-pointer ${
             listTab === 'CHECKLISTS'
@@ -446,6 +475,10 @@ export const FleetMonthlyList: React.FC = () => {
         </button>
       </div>
 
+      {listTab === 'FUEL' ? (
+        <FuelingSection />
+      ) : (
+        <>
       {/* KPI Mini-bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-white rounded-xl p-4 border border-slate-200/80 shadow-2xs flex items-center justify-between">
@@ -1232,6 +1265,8 @@ export const FleetMonthlyList: React.FC = () => {
             </div>
           ))}
         </div>
+      )}
+        </>
       )}
     </div>
   );

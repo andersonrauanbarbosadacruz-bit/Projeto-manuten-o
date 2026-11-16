@@ -1,10 +1,12 @@
-import { ChecklistRecord, DroneAsset, GaugeCalibrationRecord, NR13InspectionReport, NR13VesselMaster, OperatorServiceRelease, ServiceRequest, UltrassomEquipmentRecord, ValveCalibrationRecord, VehicleMonthlyUpdate, WorkOrder } from '../types';
+import { ChecklistRecord, DroneAsset, FuelConsumptionRule, FuelLogRecord, GaugeCalibrationRecord, NR13InspectionReport, NR13VesselMaster, OperatorServiceRelease, ServiceRequest, UltrassomEquipmentRecord, ValveCalibrationRecord, VehicleMonthlyUpdate, WorkOrder } from '../types';
 
 export interface SyncResponse {
   changed?: boolean;
   checklists?: ChecklistRecord[];
   workOrders?: WorkOrder[];
   fleetMonthlyUpdates?: VehicleMonthlyUpdate[];
+  fuelLogs?: FuelLogRecord[];
+  fuelConsumptionRules?: FuelConsumptionRule[];
   nr13Reports?: NR13InspectionReport[];
   nr13Vessels?: NR13VesselMaster[];
   valveCalibrations?: ValveCalibrationRecord[];
@@ -105,6 +107,65 @@ export const api = {
     });
     if (!res.ok) {
       throw new Error(`Erro ao excluir atualização de frota: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async saveFuelLog(data: Partial<FuelLogRecord>): Promise<{ success: boolean; fuelLog: FuelLogRecord }> {
+    const res = await fetch(`${getBaseUrl()}/api/fuel-logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      throw new Error(`Erro ao salvar abastecimento: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async deleteFuelLog(id: string): Promise<{ success: boolean; deletedIds?: string[] }> {
+    const res = await fetch(`${getBaseUrl()}/api/fuel-logs/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) {
+      throw new Error(`Erro ao excluir abastecimento: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async saveFuelConsumptionRule(data: Partial<FuelConsumptionRule>): Promise<{ success: boolean; rule: FuelConsumptionRule }> {
+    const res = await fetch(`${getBaseUrl()}/api/fuel-configs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      throw new Error(`Erro ao salvar parâmetro de consumo: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async saveFuelConsumptionRulesBatch(payload: {
+    rules: Partial<FuelConsumptionRule>[];
+    deleteRuleIds?: string[];
+  }): Promise<{ success: boolean; rules: FuelConsumptionRule[]; savedRules: FuelConsumptionRule[]; deletedIds?: string[] }> {
+    const res = await fetch(`${getBaseUrl()}/api/fuel-configs/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      throw new Error(`Erro ao salvar parâmetros de consumo em lote: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async deleteFuelConsumptionRule(id: string): Promise<{ success: boolean; deletedIds?: string[] }> {
+    const res = await fetch(`${getBaseUrl()}/api/fuel-configs/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) {
+      throw new Error(`Erro ao excluir parâmetro de consumo: ${res.statusText}`);
     }
     return res.json();
   },
@@ -323,6 +384,8 @@ export const api = {
     checklists?: ChecklistRecord[];
     workOrders?: WorkOrder[];
     fleetMonthlyUpdates?: VehicleMonthlyUpdate[];
+    fuelLogs?: FuelLogRecord[];
+    fuelConsumptionRules?: FuelConsumptionRule[];
     serviceRequests?: ServiceRequest[];
     operatorServiceReleases?: OperatorServiceRelease[];
     drones?: DroneAsset[];
@@ -338,7 +401,7 @@ export const api = {
     return res.json();
   },
 
-  async importBackup(data: any): Promise<{ success: boolean; message: string; checklists: ChecklistRecord[]; workOrders: WorkOrder[]; fleetMonthlyUpdates?: VehicleMonthlyUpdate[]; deletedIds: string[] }> {
+  async importBackup(data: any): Promise<{ success: boolean; message: string; checklists: ChecklistRecord[]; workOrders: WorkOrder[]; fleetMonthlyUpdates?: VehicleMonthlyUpdate[]; fuelLogs?: FuelLogRecord[]; fuelConsumptionRules?: FuelConsumptionRule[]; deletedIds: string[] }> {
     const res = await fetch(`${getBaseUrl()}/api/backup/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

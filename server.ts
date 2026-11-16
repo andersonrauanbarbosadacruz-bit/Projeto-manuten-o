@@ -16,7 +16,7 @@ import {
   INSPECIONE_TEST_GAUGE_STANDARD,
   INSPECIONE_TEST_GAUGE_CERT
 } from './src/data/nr13InitialData';
-import { ChecklistRecord, DroneAsset, GaugeCalibrationRecord, NR13InspectionReport, NR13VesselMaster, OperatorServiceRelease, ServiceRequest, UltrassomEquipmentRecord, ValveCalibrationRecord, VehicleMonthlyUpdate, WorkOrder } from './src/types';
+import { ChecklistRecord, DroneAsset, FuelConsumptionRule, FuelLogRecord, GaugeCalibrationRecord, NR13InspectionReport, NR13VesselMaster, OperatorServiceRelease, ServiceRequest, UltrassomEquipmentRecord, ValveCalibrationRecord, VehicleMonthlyUpdate, WorkOrder } from './src/types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +45,8 @@ interface DatabaseSchema {
   checklists: ChecklistRecord[];
   workOrders: WorkOrder[];
   fleetMonthlyUpdates: VehicleMonthlyUpdate[];
+  fuelLogs: FuelLogRecord[];
+  fuelConsumptionRules: FuelConsumptionRule[];
   nr13Reports: NR13InspectionReport[];
   nr13Vessels: NR13VesselMaster[];
   valveCalibrations: ValveCalibrationRecord[];
@@ -57,11 +59,24 @@ interface DatabaseSchema {
   lastUpdated: string;
 }
 
+const DEFAULT_FUEL_RULES: FuelConsumptionRule[] = [
+  {
+    id: 'fcr_default',
+    plate: 'DEFAULT',
+    minConsumption: 5.0,
+    avgConsumption: 10.0,
+    maxConsumption: 16.0,
+    updatedAt: new Date().toISOString()
+  }
+];
+
 // In-memory state initialized from file or defaults
 let db: DatabaseSchema = {
   checklists: [...INITIAL_CHECKLISTS],
   workOrders: [...INITIAL_WORK_ORDERS],
   fleetMonthlyUpdates: [...INITIAL_FLEET_UPDATES],
+  fuelLogs: [],
+  fuelConsumptionRules: [...DEFAULT_FUEL_RULES],
   nr13Reports: [...INITIAL_NR13_REPORTS],
   nr13Vessels: [...INITIAL_NR13_VESSELS],
   valveCalibrations: [...INITIAL_VALVE_CALIBRATIONS],
@@ -181,6 +196,12 @@ function loadDatabase() {
             fleetMonthlyUpdates: Array.isArray(parsed.fleetMonthlyUpdates)
               ? parsed.fleetMonthlyUpdates.filter((u: any) => u && u.id && !parsedDeleted.includes(u.id))
               : [...INITIAL_FLEET_UPDATES].filter(u => u && u.id && !parsedDeleted.includes(u.id)),
+            fuelLogs: Array.isArray(parsed.fuelLogs)
+              ? parsed.fuelLogs.filter((f: any) => f && f.id && !parsedDeleted.includes(f.id))
+              : [],
+            fuelConsumptionRules: Array.isArray(parsed.fuelConsumptionRules) && parsed.fuelConsumptionRules.length > 0
+              ? parsed.fuelConsumptionRules.filter((r: any) => r && r.id && !parsedDeleted.includes(r.id))
+              : [...DEFAULT_FUEL_RULES],
             nr13Reports: Array.isArray(parsed.nr13Reports)
               ? parsed.nr13Reports.filter((r: any) => r && r.id && !parsedDeleted.includes(r.id))
               : [...INITIAL_NR13_REPORTS].filter(r => r && r.id && !parsedDeleted.includes(r.id)),
@@ -284,6 +305,8 @@ app.get('/api/data', (req, res) => {
     checklists: db.checklists.filter(c => !db.deletedIds.includes(c.id)),
     workOrders: db.workOrders.filter(w => !db.deletedIds.includes(w.id)),
     fleetMonthlyUpdates: (db.fleetMonthlyUpdates || []).filter(u => !db.deletedIds.includes(u.id)),
+    fuelLogs: (db.fuelLogs || []).filter(f => !db.deletedIds.includes(f.id)),
+    fuelConsumptionRules: (db.fuelConsumptionRules || DEFAULT_FUEL_RULES).filter(r => !db.deletedIds.includes(r.id)),
     nr13Reports: (db.nr13Reports || []).filter(r => !db.deletedIds.includes(r.id)),
     nr13Vessels: (db.nr13Vessels || INITIAL_NR13_VESSELS).filter(v => !db.deletedIds.includes(v.id)),
     valveCalibrations: (db.valveCalibrations || []).filter(v => !db.deletedIds.includes(v.id)),
@@ -554,6 +577,212 @@ app.delete('/api/fleet-monthly-updates/:id', (req, res) => {
   } catch (err: any) {
     console.error('Error deleting fleet monthly update:', err);
     res.status(500).json({ error: err.message || 'Erro ao excluir atualização de frota' });
+  }
+});
+
+// ==================== ABASTECIMENTO DE VEÍCULOS & METAS DE CONSUMO ====================
+
+app.post('/api/fuel-logs', (req, res) => {
+  try {
+    const incoming = req.body;
+    if (!incoming || !incoming.plate || !incoming.driver) {
+      return res.status(400).json({ error: 'Dados do abastecimento incompletos (placa e condutor obrigatórios)' });
+    }
+    if (!db.fuelLogs) db.fuelLogs = [];
+
+    if (incoming.id && db.deletedIds.includes(incoming.id)) {
+      return res.json({ success: true, ignored: true, reason: 'Abastecimento foi excluído permanentemente.' });
+    }
+
+    const existingIdx = db.fuelLogs.findIndex(f => f.id === incoming.id);
+    let record: FuelLogRecord;
+
+    if (existingIdx >= 0) {
+      const existing = db.fuelLogs[existingIdx];
+      record = {
+        ...existing,
+        ...incoming,
+        id: existing.id,
+        code: existing.code || incoming.code,
+        plate: String(incoming.plate).trim().toUpperCase(),
+        liters: Number(incoming.liters),
+        km: Number.isFinite(Number(incoming.km)) ? Number(incoming.km) : 0,
+        updatedAt: new Date().toISOString()
+      };
+      db.fuelLogs[existingIdx] = record;
+    } else {
+      const year = new Date().getFullYear();
+      const nextNum = db.fuelLogs.length + 1;
+      record = {
+        ...incoming,
+        id: incoming.id || `fuel_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        code: incoming.code || `ABT-${year}-${String(nextNum).padStart(3, '0')}`,
+        plate: String(incoming.plate).trim().toUpperCase(),
+        liters: Number(incoming.liters),
+        km: Number.isFinite(Number(incoming.km)) ? Number(incoming.km) : 0,
+        createdAt: incoming.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      db.fuelLogs.unshift(record);
+    }
+
+    saveDatabase();
+    res.json({ success: true, fuelLog: record });
+  } catch (err: any) {
+    console.error('Error saving fuel log:', err);
+    res.status(500).json({ error: err.message || 'Erro ao salvar abastecimento' });
+  }
+});
+
+app.delete('/api/fuel-logs/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!db.fuelLogs) db.fuelLogs = [];
+    const initialLength = db.fuelLogs.length;
+    db.fuelLogs = db.fuelLogs.filter(f => f.id !== id);
+    if (!db.deletedIds.includes(id)) {
+      db.deletedIds.push(id);
+    }
+    saveDatabase();
+    res.json({ success: true, deleted: initialLength !== db.fuelLogs.length, deletedIds: db.deletedIds });
+  } catch (err: any) {
+    console.error('Error deleting fuel log:', err);
+    res.status(500).json({ error: err.message || 'Erro ao excluir abastecimento' });
+  }
+});
+
+app.post('/api/fuel-configs', (req, res) => {
+  try {
+    const incoming = req.body;
+    if (!incoming || !incoming.plate) {
+      return res.status(400).json({ error: 'Placa ou padrão DEFAULT é obrigatório' });
+    }
+    if (!db.fuelConsumptionRules) db.fuelConsumptionRules = [...DEFAULT_FUEL_RULES];
+
+    const normalizedPlate = String(incoming.plate).trim().toUpperCase() === 'DEFAULT'
+      ? 'DEFAULT'
+      : String(incoming.plate).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    if (incoming.id && db.deletedIds.includes(incoming.id)) {
+      db.deletedIds = db.deletedIds.filter(d => d !== incoming.id);
+    }
+
+    const existingIdx = db.fuelConsumptionRules.findIndex(
+      r => (incoming.id && r.id === incoming.id) || r.plate.toUpperCase() === normalizedPlate
+    );
+
+    let record: FuelConsumptionRule;
+    if (existingIdx >= 0) {
+      record = {
+        ...db.fuelConsumptionRules[existingIdx],
+        ...incoming,
+        id: db.fuelConsumptionRules[existingIdx].id,
+        plate: normalizedPlate,
+        minConsumption: Number(incoming.minConsumption),
+        avgConsumption: Number(incoming.avgConsumption),
+        maxConsumption: Number(incoming.maxConsumption),
+        updatedAt: new Date().toISOString()
+      };
+      db.fuelConsumptionRules[existingIdx] = record;
+    } else {
+      record = {
+        id: incoming.id || (normalizedPlate === 'DEFAULT' ? 'fcr_default' : `fcr_${normalizedPlate}_${Date.now()}`),
+        plate: normalizedPlate,
+        minConsumption: Number(incoming.minConsumption),
+        avgConsumption: Number(incoming.avgConsumption),
+        maxConsumption: Number(incoming.maxConsumption),
+        updatedAt: new Date().toISOString()
+      };
+      db.fuelConsumptionRules.push(record);
+    }
+
+    saveDatabase();
+    res.json({ success: true, rule: record });
+  } catch (err: any) {
+    console.error('Error saving fuel consumption config:', err);
+    res.status(500).json({ error: err.message || 'Erro ao salvar parâmetro de consumo' });
+  }
+});
+
+app.post('/api/fuel-configs/batch', (req, res) => {
+  try {
+    const { rules, deleteRuleIds } = req.body || {};
+    if (!db.fuelConsumptionRules) db.fuelConsumptionRules = [...DEFAULT_FUEL_RULES];
+
+    if (Array.isArray(deleteRuleIds) && deleteRuleIds.length > 0) {
+      const toDelete = new Set(deleteRuleIds.filter((id: string) => id && id !== 'fcr_default'));
+      db.fuelConsumptionRules = db.fuelConsumptionRules.filter(r => !toDelete.has(r.id));
+      toDelete.forEach((id: string) => {
+        if (!db.deletedIds.includes(id)) db.deletedIds.push(id);
+      });
+    }
+
+    const savedRules: FuelConsumptionRule[] = [];
+    if (Array.isArray(rules)) {
+      rules.forEach((incoming: Partial<FuelConsumptionRule>) => {
+        if (!incoming || !incoming.plate) return;
+        const normalizedPlate = String(incoming.plate).trim().toUpperCase() === 'DEFAULT'
+          ? 'DEFAULT'
+          : String(incoming.plate).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+        if (incoming.id && db.deletedIds.includes(incoming.id)) {
+          db.deletedIds = db.deletedIds.filter(d => d !== incoming.id);
+        }
+
+        const existingIdx = db.fuelConsumptionRules!.findIndex(
+          r => (incoming.id && r.id === incoming.id) || r.plate.toUpperCase() === normalizedPlate
+        );
+
+        let record: FuelConsumptionRule;
+        if (existingIdx >= 0) {
+          record = {
+            ...db.fuelConsumptionRules![existingIdx],
+            ...incoming,
+            id: db.fuelConsumptionRules![existingIdx].id,
+            plate: normalizedPlate,
+            minConsumption: Number(incoming.minConsumption),
+            avgConsumption: Number(incoming.avgConsumption),
+            maxConsumption: Number(incoming.maxConsumption),
+            updatedAt: new Date().toISOString()
+          };
+          db.fuelConsumptionRules![existingIdx] = record;
+        } else {
+          record = {
+            id: incoming.id || (normalizedPlate === 'DEFAULT' ? 'fcr_default' : `fcr_${normalizedPlate}_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`),
+            plate: normalizedPlate,
+            minConsumption: Number(incoming.minConsumption),
+            avgConsumption: Number(incoming.avgConsumption),
+            maxConsumption: Number(incoming.maxConsumption),
+            updatedAt: new Date().toISOString()
+          };
+          db.fuelConsumptionRules!.push(record);
+        }
+        savedRules.push(record);
+      });
+    }
+
+    saveDatabase();
+    res.json({ success: true, rules: db.fuelConsumptionRules, savedRules, deletedIds: db.deletedIds });
+  } catch (err: any) {
+    console.error('Error batch saving fuel consumption configs:', err);
+    res.status(500).json({ error: err.message || 'Erro ao salvar parâmetros de consumo em lote' });
+  }
+});
+
+app.delete('/api/fuel-configs/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!db.fuelConsumptionRules) db.fuelConsumptionRules = [...DEFAULT_FUEL_RULES];
+    if (id === 'fcr_default') {
+      return res.status(400).json({ error: 'O parâmetro padrão geral não pode ser excluído, apenas editado.' });
+    }
+    db.fuelConsumptionRules = db.fuelConsumptionRules.filter(r => r.id !== id);
+    if (!db.deletedIds.includes(id)) db.deletedIds.push(id);
+    saveDatabase();
+    res.json({ success: true, deletedIds: db.deletedIds });
+  } catch (err: any) {
+    console.error('Error deleting fuel consumption config:', err);
+    res.status(500).json({ error: err.message || 'Erro ao excluir parâmetro de consumo' });
   }
 });
 
@@ -1065,6 +1294,8 @@ app.post('/api/sync/batch', (req, res) => {
       checklists: incomingChecklists, 
       workOrders: incomingWorkOrders,
       fleetMonthlyUpdates: incomingFleetUpdates,
+      fuelLogs: incomingFuelLogs,
+      fuelConsumptionRules: incomingFuelRules,
       serviceRequests: incomingServiceRequests,
       operatorServiceReleases: incomingOperatorReleases,
       drones: incomingDrones,
@@ -1074,6 +1305,8 @@ app.post('/api/sync/batch', (req, res) => {
     let changed = false;
 
     if (!db.fleetMonthlyUpdates) db.fleetMonthlyUpdates = [];
+    if (!db.fuelLogs) db.fuelLogs = [];
+    if (!db.fuelConsumptionRules) db.fuelConsumptionRules = [...DEFAULT_FUEL_RULES];
     if (!db.serviceRequests) db.serviceRequests = [];
     if (!db.operatorServiceReleases) db.operatorServiceReleases = [];
     if (!db.drones) db.drones = [...INITIAL_DRONES];
@@ -1090,6 +1323,8 @@ app.post('/api/sync/batch', (req, res) => {
       db.checklists = db.checklists.filter(c => !db.deletedIds.includes(c.id));
       db.workOrders = db.workOrders.filter(w => !db.deletedIds.includes(w.id));
       db.fleetMonthlyUpdates = db.fleetMonthlyUpdates.filter(u => !db.deletedIds.includes(u.id));
+      db.fuelLogs = db.fuelLogs.filter(f => !db.deletedIds.includes(f.id));
+      db.fuelConsumptionRules = db.fuelConsumptionRules.filter(r => !db.deletedIds.includes(r.id));
       db.serviceRequests = db.serviceRequests.filter(s => !db.deletedIds.includes(s.id));
       db.operatorServiceReleases = db.operatorServiceReleases.filter(o => !db.deletedIds.includes(o.id));
       db.drones = db.drones.filter(d => !db.deletedIds.includes(d.id));
@@ -1206,6 +1441,46 @@ app.post('/api/sync/batch', (req, res) => {
       }
     }
 
+    if (Array.isArray(incomingFuelLogs) && incomingFuelLogs.length > 0) {
+      for (const item of incomingFuelLogs) {
+        if (!item || !item.id) continue;
+        if (db.deletedIds.includes(item.id)) continue;
+        const idx = db.fuelLogs.findIndex(f => f.id === item.id);
+        if (idx >= 0) {
+          const existing = db.fuelLogs[idx];
+          const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+          const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
+          if (incomingTime >= existingTime) {
+            db.fuelLogs[idx] = { ...existing, ...item };
+            changed = true;
+          }
+        } else {
+          db.fuelLogs.unshift(item);
+          changed = true;
+        }
+      }
+    }
+
+    if (Array.isArray(incomingFuelRules) && incomingFuelRules.length > 0) {
+      for (const item of incomingFuelRules) {
+        if (!item || !item.id || !item.plate) continue;
+        if (db.deletedIds.includes(item.id)) continue;
+        const idx = db.fuelConsumptionRules.findIndex(r => r.id === item.id || r.plate === item.plate);
+        if (idx >= 0) {
+          const existing = db.fuelConsumptionRules[idx];
+          const existingTime = new Date(existing.updatedAt || 0).getTime();
+          const incomingTime = new Date(item.updatedAt || 0).getTime();
+          if (incomingTime >= existingTime) {
+            db.fuelConsumptionRules[idx] = { ...existing, ...item };
+            changed = true;
+          }
+        } else {
+          db.fuelConsumptionRules.push(item);
+          changed = true;
+        }
+      }
+    }
+
     if (changed) {
       saveDatabase();
     }
@@ -1215,6 +1490,8 @@ app.post('/api/sync/batch', (req, res) => {
       checklists: db.checklists.filter(c => !db.deletedIds.includes(c.id)),
       workOrders: db.workOrders.filter(w => !db.deletedIds.includes(w.id)),
       fleetMonthlyUpdates: db.fleetMonthlyUpdates.filter(u => !db.deletedIds.includes(u.id)),
+      fuelLogs: db.fuelLogs.filter(f => !db.deletedIds.includes(f.id)),
+      fuelConsumptionRules: db.fuelConsumptionRules.filter(r => !db.deletedIds.includes(r.id)),
       serviceRequests: db.serviceRequests.filter(s => !db.deletedIds.includes(s.id)),
       operatorServiceReleases: db.operatorServiceReleases.filter(o => !db.deletedIds.includes(o.id)),
       drones: db.drones.filter(d => !db.deletedIds.includes(d.id)),
@@ -1257,6 +1534,8 @@ app.post('/api/backup/import', (req, res) => {
       checklists: incoming.checklists,
       workOrders: incoming.workOrders,
       fleetMonthlyUpdates: Array.isArray(incoming.fleetMonthlyUpdates) ? incoming.fleetMonthlyUpdates : [],
+      fuelLogs: Array.isArray(incoming.fuelLogs) ? incoming.fuelLogs : (db.fuelLogs || []),
+      fuelConsumptionRules: Array.isArray(incoming.fuelConsumptionRules) && incoming.fuelConsumptionRules.length > 0 ? incoming.fuelConsumptionRules : (db.fuelConsumptionRules || [...DEFAULT_FUEL_RULES]),
       nr13Reports: Array.isArray(incoming.nr13Reports) ? incoming.nr13Reports : (db.nr13Reports || []),
       nr13Vessels: Array.isArray(incoming.nr13Vessels) && incoming.nr13Vessels.length > 0 ? incoming.nr13Vessels : (db.nr13Vessels || [...INITIAL_NR13_VESSELS]),
       valveCalibrations: Array.isArray(incoming.valveCalibrations) ? incoming.valveCalibrations : (db.valveCalibrations || []),
@@ -1276,6 +1555,8 @@ app.post('/api/backup/import', (req, res) => {
       checklists: db.checklists,
       workOrders: db.workOrders,
       fleetMonthlyUpdates: db.fleetMonthlyUpdates,
+      fuelLogs: db.fuelLogs,
+      fuelConsumptionRules: db.fuelConsumptionRules,
       deletedIds: db.deletedIds
     });
   } catch (err: any) {
@@ -1296,6 +1577,8 @@ app.post('/api/reset', (req, res) => {
       checklists: [...INITIAL_CHECKLISTS],
       workOrders: [...INITIAL_WORK_ORDERS],
       fleetMonthlyUpdates: [...INITIAL_FLEET_UPDATES],
+      fuelLogs: db.fuelLogs || [],
+      fuelConsumptionRules: db.fuelConsumptionRules || [...DEFAULT_FUEL_RULES],
       nr13Reports: [...INITIAL_NR13_REPORTS],
       nr13Vessels: [...INITIAL_NR13_VESSELS],
       valveCalibrations: [...INITIAL_VALVE_CALIBRATIONS],

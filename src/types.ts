@@ -26,6 +26,7 @@ export interface Vehicle {
   model: string;
   plate: string;
   farm?: Farm;
+  isTemporary?: boolean;
 }
 
 export interface DroneAsset {
@@ -204,6 +205,40 @@ export interface VehicleMonthlyUpdate {
   acknowledgedAt?: string;
   acknowledgedBy?: string;
   acknowledgementJustification?: string;
+}
+
+export type FuelType = 'Gasolina' | 'Diesel Comum' | 'Diesel S10';
+
+export const FUEL_TYPES: FuelType[] = ['Gasolina', 'Diesel Comum', 'Diesel S10'];
+
+export type FuelLocation = Farm | 'Posto L3' | 'Posto Raul Lins';
+
+export const FUEL_LOCATIONS: FuelLocation[] = [...FARMS, 'Posto L3', 'Posto Raul Lins'];
+
+export interface FuelLogRecord {
+  id: string;
+  code: string; // Ex: ABT-2026-001
+  date: string; // YYYY-MM-DD
+  time?: string; // HH:mm
+  driver: string; // Condutor
+  plate: string; // Placa do veículo
+  vehicleModel?: string;
+  fuelType: FuelType; // Gasolina | Diesel Comum | Diesel S10
+  liters: number; // Quantidade abastecida (L)
+  km: number; // Odômetro no abastecimento
+  location: FuelLocation; // Fazenda, Posto L3 ou Posto Raul Lins
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface FuelConsumptionRule {
+  id: string;
+  plate: string; // 'DEFAULT' para padrão geral da frota ou placa específica (ex: 'TYY7F10')
+  minConsumption: number; // km/L mínimo esperado
+  avgConsumption: number; // km/L médio esperado
+  maxConsumption: number; // km/L máximo esperado
+  updatedAt?: string;
 }
 
 export type ActiveTab = 

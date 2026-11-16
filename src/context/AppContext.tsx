@@ -18,8 +18,11 @@ import {
   ServiceRequest,
   OperatorServiceRelease,
   AccessModule,
-  ALL_ACCESS_MODULES
+  ALL_ACCESS_MODULES,
+  FuelLogRecord,
+  FuelConsumptionRule
 } from '../types';
+import { DEFAULT_FALLBACK_RULE } from '../utils/fuelConsumptionHelper';
 import { INITIAL_CHECKLISTS, INITIAL_WORK_ORDERS, INITIAL_VEHICLES, INITIAL_DRONES, INITIAL_FLEET_UPDATES } from '../data/initialData';
 import {
   INITIAL_NR13_REPORTS,
@@ -40,7 +43,7 @@ import { cloudLiveSync } from '../utils/cloudLiveSync';
 
 interface DeleteModalState {
   isOpen: boolean;
-  type: 'checklist' | 'work-order' | 'fleet-update' | 'service-request';
+  type: 'checklist' | 'work-order' | 'fleet-update' | 'service-request' | 'fuel-log';
   id: string;
   code: string;
   description?: string;
@@ -123,7 +126,7 @@ interface AppContextType {
 
   // In-app Delete Confirmation Modal State
   deleteModalState: DeleteModalState;
-  requestDelete: (params: { type: 'checklist' | 'work-order' | 'fleet-update' | 'service-request'; id: string; code: string; description?: string }) => void;
+  requestDelete: (params: { type: 'checklist' | 'work-order' | 'fleet-update' | 'service-request' | 'fuel-log'; id: string; code: string; description?: string }) => void;
   cancelDelete: () => void;
   confirmDelete: () => Promise<void>;
 
@@ -152,13 +155,27 @@ interface AppContextType {
   setViewFleetUpdateDetail: (u: VehicleMonthlyUpdate | null) => void;
   showFleetUpdateFormModal: boolean;
   setShowFleetUpdateFormModal: (open: boolean) => void;
-  fleetFormMode: 'UPDATE' | 'CHECKLIST' | 'DRONE';
-  setFleetFormMode: (mode: 'UPDATE' | 'CHECKLIST' | 'DRONE') => void;
-  startNewFleetAction: (mode?: 'UPDATE' | 'CHECKLIST' | 'DRONE') => void;
+  fleetFormMode: 'UPDATE' | 'CHECKLIST' | 'DRONE' | 'FUEL';
+  setFleetFormMode: (mode: 'UPDATE' | 'CHECKLIST' | 'DRONE' | 'FUEL') => void;
+  fleetListTab: 'UPDATES' | 'CHECKLISTS' | 'DRONES' | 'FUEL';
+  setFleetListTab: (tab: 'UPDATES' | 'CHECKLISTS' | 'DRONES' | 'FUEL') => void;
+  startNewFleetAction: (mode?: 'UPDATE' | 'CHECKLIST' | 'DRONE' | 'FUEL') => void;
   addFleetMonthlyUpdate: (update: Omit<VehicleMonthlyUpdate, 'id' | 'code' | 'createdAt'> & { id?: string; code?: string; createdAt?: string }) => VehicleMonthlyUpdate;
   deleteFleetMonthlyUpdate: (id: string) => Promise<void>;
   acknowledgeFleetSinistro: (updateId: string, justification?: string) => Promise<void>;
   unacknowledgeFleetSinistro: (updateId: string) => Promise<void>;
+
+  // Fueling & Consumption Targets (Abastecimentos da Frota)
+  fuelLogs: FuelLogRecord[];
+  fuelConsumptionRules: FuelConsumptionRule[];
+  saveFuelLog: (log: Omit<FuelLogRecord, 'id' | 'code' | 'createdAt'> & { id?: string; code?: string; createdAt?: string }) => FuelLogRecord;
+  deleteFuelLog: (id: string) => Promise<void>;
+  saveFuelConsumptionRule: (rule: Omit<FuelConsumptionRule, 'id'> & { id?: string }) => FuelConsumptionRule;
+  saveFuelConsumptionRulesBatch: (payload: {
+    rules: Array<Omit<FuelConsumptionRule, 'id'> & { id?: string }>;
+    deleteRuleIds?: string[];
+  }) => FuelConsumptionRule[];
+  deleteFuelConsumptionRule: (id: string) => Promise<void>;
 
   // NR-13 & Metrologia (Laudos e Calibrações)
   nr13Reports: NR13InspectionReport[];
@@ -223,7 +240,9 @@ const STORAGE_KEYS = {
   OPERATOR_RELEASES: 'elciruelo_operator_releases_v1',
   OPERATOR_SS_KEY: 'elciruelo_operator_ss_key',
   MY_REQUEST_IDS: 'elciruelo_my_service_requests_v1',
-  ALLOWED_MODULES: 'elciruelo_allowed_modules_v1'
+  ALLOWED_MODULES: 'elciruelo_allowed_modules_v1',
+  FUEL_LOGS: 'elciruelo_fuel_logs_v1',
+  FUEL_RULES: 'elciruelo_fuel_rules_v1'
 };
 
 const parseModulesParam = (raw: string | null): AccessModule[] | null => {
@@ -531,7 +550,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   interface OfflineQueueItem {
     id: string;
-    type: 'checklist' | 'work-order' | 'fleet-update' | 'service-request';
+    type: 'checklist' | 'work-order' | 'fleet-update' | 'service-request' | 'fuel-log' | 'fuel-rule';
     action: 'save' | 'delete';
     data: any;
     timestamp: number;
@@ -563,12 +582,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Vehicle Management
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>(() => {
+    const tempVehicleSeed: Vehicle = {
+      id: 'v_temp_aaa0a00',
+      model: 'VEÍCULO TEMPORÁRIO',
+      plate: 'AAA0A00',
+      isTemporary: true
+    };
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.VEHICLES);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          const hasTemp = parsed.some(
+            (v: Vehicle) => String(v?.plate || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '') === 'AAA0A00'
+          );
+          if (!hasTemp) {
+            return [...parsed, tempVehicleSeed];
+          }
+          return parsed.map((v: Vehicle) =>
+            String(v?.plate || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '') === 'AAA0A00'
+              ? { ...v, isTemporary: true }
+              : v
+          );
         }
       }
     } catch {}
@@ -582,11 +617,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [vehicles]);
 
   const addVehicle = useCallback((v: Omit<Vehicle, 'id'>) => {
+    const cleanPlate = v.plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     const newV: Vehicle = {
       id: `v_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       model: v.model.trim().toUpperCase(),
-      plate: v.plate.trim().toUpperCase(),
-      farm: v.farm
+      plate: cleanPlate,
+      farm: v.farm,
+      isTemporary: Boolean(v.isTemporary || cleanPlate === 'AAA0A00')
     };
     setVehicles(prev => [newV, ...prev]);
     return newV;
@@ -670,6 +707,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const deletedRaw = localStorage.getItem(STORAGE_KEYS.DELETED_IDS);
     const dSet = new Set(deletedRaw ? JSON.parse(deletedRaw) : []);
     return INITIAL_FLEET_UPDATES.filter(u => u && u.id && !dSet.has(u.id));
+  });
+
+  // Fuel Logs & Consumption Rules State
+  const [fuelLogs, setFuelLogs] = useState<FuelLogRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.FUEL_LOGS);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const deletedRaw = localStorage.getItem(STORAGE_KEYS.DELETED_IDS);
+          const dSet = new Set(deletedRaw ? JSON.parse(deletedRaw) : []);
+          return parsed.filter(f => f && f.id && !dSet.has(f.id));
+        }
+      }
+    } catch {}
+    return [];
+  });
+
+  const [fuelConsumptionRules, setFuelConsumptionRules] = useState<FuelConsumptionRule[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.FUEL_RULES);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const deletedRaw = localStorage.getItem(STORAGE_KEYS.DELETED_IDS);
+          const dSet = new Set(deletedRaw ? JSON.parse(deletedRaw) : []);
+          const valid = parsed.filter(r => r && r.id && !dSet.has(r.id));
+          if (valid.length > 0) return valid;
+        }
+      }
+    } catch {}
+    return [DEFAULT_FALLBACK_RULE];
   });
 
   // NR-13 Reports State
@@ -866,10 +935,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     description: ''
   });
 
-  const [fleetFormMode, setFleetFormMode] = useState<'UPDATE' | 'CHECKLIST' | 'DRONE'>('UPDATE');
+  const [fleetFormMode, setFleetFormMode] = useState<'UPDATE' | 'CHECKLIST' | 'DRONE' | 'FUEL'>('UPDATE');
+  const [fleetListTab, setFleetListTab] = useState<'UPDATES' | 'CHECKLISTS' | 'DRONES' | 'FUEL'>('UPDATES');
 
-  const startNewFleetAction = useCallback((mode: 'UPDATE' | 'CHECKLIST' | 'DRONE' = 'UPDATE') => {
+  const startNewFleetAction = useCallback((mode: 'UPDATE' | 'CHECKLIST' | 'DRONE' | 'FUEL' = 'UPDATE') => {
     setFleetFormMode(mode);
+    if (mode === 'FUEL') setFleetListTab('FUEL');
+    else if (mode === 'CHECKLIST') setFleetListTab('CHECKLISTS');
+    else if (mode === 'DRONE') setFleetListTab('DRONES');
+    else setFleetListTab('UPDATES');
     setActiveTab('new-fleet-update');
   }, []);
 
@@ -933,6 +1007,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } else if (item.type === 'service-request') {
             await api.saveServiceRequest(item.data);
             cloudLiveSync.publish('SERVICE_REQUEST_SAVED', item.data);
+          } else if (item.type === 'fuel-log') {
+            await api.saveFuelLog(item.data);
+            cloudLiveSync.publish('FUEL_LOG_SAVED', item.data);
+          } else if (item.type === 'fuel-rule') {
+            await api.saveFuelConsumptionRule(item.data);
+            cloudLiveSync.publish('FUEL_RULE_SAVED', item.data);
           } else {
             await api.saveWorkOrder(item.data);
             cloudLiveSync.publish('WORK_ORDER_SAVED', item.data);
@@ -947,6 +1027,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } else if (item.type === 'service-request') {
             await api.deleteServiceRequest(item.id);
             cloudLiveSync.publish('SERVICE_REQUEST_DELETED', { id: item.id });
+          } else if (item.type === 'fuel-log') {
+            await api.deleteFuelLog(item.id);
+            cloudLiveSync.publish('FUEL_LOG_DELETED', { id: item.id });
+          } else if (item.type === 'fuel-rule') {
+            await api.deleteFuelConsumptionRule(item.id);
+            cloudLiveSync.publish('FUEL_RULE_DELETED', { id: item.id });
           } else {
             await api.deleteWorkOrder(item.id);
             cloudLiveSync.publish('WORK_ORDER_DELETED', { id: item.id });
@@ -1409,6 +1495,102 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         }
 
+        // 7. Reconcile Fuel Logs & Consumption Rules
+        if (Array.isArray(data.fuelLogs)) {
+          setFuelLogs(prev => {
+            const cleanPrev = prev.filter(f => f && f.id && !deletedSet.has(f.id));
+            const serverValid = data.fuelLogs!.filter(f => f && f.id && !deletedSet.has(f.id));
+            const mergedMap = new Map<string, FuelLogRecord>();
+            serverValid.forEach(f => mergedMap.set(f.id, f));
+
+            const missingOrNewerOnLocal: FuelLogRecord[] = [];
+            for (const local of cleanPrev) {
+              const srv = mergedMap.get(local.id);
+              if (!srv) {
+                mergedMap.set(local.id, local);
+                missingOrNewerOnLocal.push(local);
+              } else {
+                const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
+                const srvTime = new Date(srv.updatedAt || srv.createdAt || 0).getTime();
+                if (localTime > srvTime) {
+                  mergedMap.set(local.id, local);
+                  missingOrNewerOnLocal.push(local);
+                }
+              }
+            }
+
+            if (missingOrNewerOnLocal.length > 0) {
+              api.batchSync({ fuelLogs: missingOrNewerOnLocal }).catch(() => {});
+            }
+
+            const merged = Array.from(mergedMap.values()).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+
+            const isSame =
+              prev.length === merged.length &&
+              prev.every((p, idx) =>
+                p.id === merged[idx].id &&
+                p.km === merged[idx].km &&
+                p.liters === merged[idx].liters &&
+                p.date === merged[idx].date &&
+                p.updatedAt === merged[idx].updatedAt
+              );
+            if (isSame) return prev;
+
+            didDataChange = true;
+            safeLocalStorageSet(STORAGE_KEYS.FUEL_LOGS, JSON.stringify(merged));
+            return merged;
+          });
+        }
+
+        if (Array.isArray(data.fuelConsumptionRules)) {
+          setFuelConsumptionRules(prev => {
+            const cleanPrev = prev.filter(r => r && r.id && !deletedSet.has(r.id));
+            const serverValid = data.fuelConsumptionRules!.filter(r => r && r.id && !deletedSet.has(r.id));
+            const mergedMap = new Map<string, FuelConsumptionRule>();
+            serverValid.forEach(r => mergedMap.set(r.plate, r));
+
+            const missingOrNewerOnLocal: FuelConsumptionRule[] = [];
+            for (const local of cleanPrev) {
+              const srv = mergedMap.get(local.plate);
+              if (!srv) {
+                mergedMap.set(local.plate, local);
+                missingOrNewerOnLocal.push(local);
+              } else {
+                const localTime = new Date(local.updatedAt || 0).getTime();
+                const srvTime = new Date(srv.updatedAt || 0).getTime();
+                if (localTime > srvTime) {
+                  mergedMap.set(local.plate, local);
+                  missingOrNewerOnLocal.push(local);
+                }
+              }
+            }
+
+            if (missingOrNewerOnLocal.length > 0) {
+              api.batchSync({ fuelConsumptionRules: missingOrNewerOnLocal }).catch(() => {});
+            }
+
+            const merged = Array.from(mergedMap.values());
+            if (merged.length === 0) merged.push(DEFAULT_FALLBACK_RULE);
+
+            const isSame =
+              prev.length === merged.length &&
+              prev.every((p, idx) =>
+                p.id === merged[idx].id &&
+                p.minConsumption === merged[idx].minConsumption &&
+                p.avgConsumption === merged[idx].avgConsumption &&
+                p.maxConsumption === merged[idx].maxConsumption &&
+                p.updatedAt === merged[idx].updatedAt
+              );
+            if (isSame) return prev;
+
+            didDataChange = true;
+            safeLocalStorageSet(STORAGE_KEYS.FUEL_RULES, JSON.stringify(merged));
+            return merged;
+          });
+        }
+
         if (didDataChange || !hasSyncedOnceRef.current) {
           hasSyncedOnceRef.current = true;
           setLastSyncTime(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
@@ -1789,6 +1971,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else if (msg.type === 'FLEET_UPDATE_DELETED' && msg.data?.id) {
         recordDeletedId(msg.data.id);
         setFleetMonthlyUpdates(prev => prev.filter(u => u.id !== msg.data.id));
+      } else if (msg.type === 'FUEL_LOG_SAVED' && msg.data?.id) {
+        if (deletedIdsRef.current.includes(msg.data.id)) return;
+        const incoming = msg.data as FuelLogRecord;
+        setFuelLogs(prev => {
+          const filtered = prev.filter(f => f.id !== incoming.id && !deletedIdsRef.current.includes(f.id));
+          const next = [incoming, ...filtered];
+          safeLocalStorageSet(STORAGE_KEYS.FUEL_LOGS, JSON.stringify(next));
+          return next;
+        });
+        api.saveFuelLog(incoming).catch(() => {});
+        setSyncToast({
+          isOpen: true,
+          message: `⛽ Abastecimento ${incoming.code} (${incoming.plate} · ${incoming.liters}L) sincronizado!`,
+          type: 'success'
+        });
+      } else if (msg.type === 'FUEL_LOG_DELETED' && msg.data?.id) {
+        recordDeletedId(msg.data.id);
+        setFuelLogs(prev => {
+          const next = prev.filter(f => f.id !== msg.data.id);
+          safeLocalStorageSet(STORAGE_KEYS.FUEL_LOGS, JSON.stringify(next));
+          return next;
+        });
+      } else if (msg.type === 'FUEL_RULE_SAVED' && msg.data?.plate) {
+        const incoming = msg.data as FuelConsumptionRule;
+        setFuelConsumptionRules(prev => {
+          const filtered = prev.filter(r => r.id !== incoming.id && r.plate !== incoming.plate);
+          const next = [...filtered, incoming];
+          safeLocalStorageSet(STORAGE_KEYS.FUEL_RULES, JSON.stringify(next));
+          return next;
+        });
+        api.saveFuelConsumptionRule(incoming).catch(() => {});
+      } else if (msg.type === 'FUEL_RULE_DELETED' && msg.data?.id) {
+        recordDeletedId(msg.data.id);
+        setFuelConsumptionRules(prev => {
+          const next = prev.filter(r => r.id !== msg.data.id);
+          safeLocalStorageSet(STORAGE_KEYS.FUEL_RULES, JSON.stringify(next));
+          return next;
+        });
       } else if (msg.type === 'CHECKLIST_DELETED' && msg.data?.id) {
         recordDeletedId(msg.data.id);
         setChecklists(prev => prev.filter(c => c.id !== msg.data.id));
@@ -1801,6 +2021,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setChecklists(prev => prev.filter(c => c.id !== msg.data.id));
         } else if (msg.data.type === 'fleet-update') {
           setFleetMonthlyUpdates(prev => prev.filter(u => u.id !== msg.data.id));
+        } else if (msg.data.type === 'fuel-log') {
+          setFuelLogs(prev => prev.filter(f => f.id !== msg.data.id));
         } else {
           setWorkOrders(prev => prev.filter(w => w.id !== msg.data.id));
         }
@@ -2535,6 +2757,260 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [viewFleetUpdateDetail]);
 
+  // ==================== ABASTECIMENTO DE VEÍCULOS & PARÂMETROS DE CONSUMO ====================
+
+  const saveFuelLog = useCallback((
+    data: Omit<FuelLogRecord, 'id' | 'code' | 'createdAt'> & { id?: string; code?: string; createdAt?: string }
+  ): FuelLogRecord => {
+    const year = new Date().getFullYear();
+    const nowIso = new Date().toISOString();
+    const existing = data.id ? fuelLogs.find(f => f.id === data.id) : undefined;
+    const nextIndex = fuelLogs.length + 1;
+
+    const record: FuelLogRecord = {
+      ...existing,
+      ...data,
+      id: existing?.id || data.id || `fuel_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      code: existing?.code || data.code || `ABT-${year}-${String(nextIndex).padStart(3, '0')}`,
+      plate: String(data.plate).trim().toUpperCase().replace(/[^A-Z0-9]/g, ''),
+      liters: Number(data.liters),
+      km: Number.isFinite(Number(data.km)) ? Number(data.km) : 0,
+      createdAt: existing?.createdAt || data.createdAt || nowIso,
+      updatedAt: nowIso
+    };
+
+    setFuelLogs(prev => {
+      const next = [record, ...prev.filter(f => f.id !== record.id)];
+      safeLocalStorageSet(STORAGE_KEYS.FUEL_LOGS, JSON.stringify(next));
+      return next;
+    });
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      addToOfflineQueue({
+        id: record.id,
+        type: 'fuel-log',
+        action: 'save',
+        data: record,
+        timestamp: Date.now()
+      });
+      setSyncToast({
+        isOpen: true,
+        message: `💾 Salvo no aparelho (Modo Offline). O abastecimento ${record.code} subirá assim que houver sinal!`,
+        type: 'info'
+      });
+    } else {
+      api.saveFuelLog(record).catch(err => {
+        console.warn('[API] Could not save fuel log to server, queued offline:', err);
+        addToOfflineQueue({
+          id: record.id,
+          type: 'fuel-log',
+          action: 'save',
+          data: record,
+          timestamp: Date.now()
+        });
+      });
+      cloudLiveSync.publish('FUEL_LOG_SAVED', record);
+    }
+
+    return record;
+  }, [fuelLogs, addToOfflineQueue]);
+
+  const deleteFuelLog = useCallback(async (id: string) => {
+    setFuelLogs(prev => {
+      const next = prev.filter(f => f.id !== id);
+      safeLocalStorageSet(STORAGE_KEYS.FUEL_LOGS, JSON.stringify(next));
+      return next;
+    });
+    recordDeletedId(id);
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      addToOfflineQueue({
+        id,
+        type: 'fuel-log',
+        action: 'delete',
+        data: { id },
+        timestamp: Date.now()
+      });
+    } else {
+      try {
+        await api.deleteFuelLog(id);
+        cloudLiveSync.publish('FUEL_LOG_DELETED', { id });
+        cloudLiveSync.publish('ITEM_DELETED', { id, type: 'fuel-log' });
+      } catch (err) {
+        console.warn('[API] Could not delete fuel log on server, queued offline:', err);
+        addToOfflineQueue({
+          id,
+          type: 'fuel-log',
+          action: 'delete',
+          data: { id },
+          timestamp: Date.now()
+        });
+      }
+    }
+  }, [recordDeletedId, addToOfflineQueue]);
+
+  const saveFuelConsumptionRule = useCallback((
+    ruleData: Omit<FuelConsumptionRule, 'id'> & { id?: string }
+  ): FuelConsumptionRule => {
+    const normalizedPlate = String(ruleData.plate).trim().toUpperCase() === 'DEFAULT'
+      ? 'DEFAULT'
+      : String(ruleData.plate).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    const existing = fuelConsumptionRules.find(
+      r => (ruleData.id && r.id === ruleData.id) || r.plate.toUpperCase() === normalizedPlate
+    );
+
+    const record: FuelConsumptionRule = {
+      id: existing?.id || ruleData.id || (normalizedPlate === 'DEFAULT' ? 'fcr_default' : `fcr_${normalizedPlate}_${Date.now()}`),
+      plate: normalizedPlate,
+      minConsumption: Number(ruleData.minConsumption),
+      avgConsumption: Number(ruleData.avgConsumption),
+      maxConsumption: Number(ruleData.maxConsumption),
+      updatedAt: new Date().toISOString()
+    };
+
+    setFuelConsumptionRules(prev => {
+      const filtered = prev.filter(r => r.id !== record.id && r.plate !== record.plate);
+      const next = [...filtered, record];
+      safeLocalStorageSet(STORAGE_KEYS.FUEL_RULES, JSON.stringify(next));
+      return next;
+    });
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      addToOfflineQueue({
+        id: record.id,
+        type: 'fuel-rule',
+        action: 'save',
+        data: record,
+        timestamp: Date.now()
+      });
+    } else {
+      api.saveFuelConsumptionRule(record).catch(() => {
+        addToOfflineQueue({
+          id: record.id,
+          type: 'fuel-rule',
+          action: 'save',
+          data: record,
+          timestamp: Date.now()
+        });
+      });
+      cloudLiveSync.publish('FUEL_RULE_SAVED', record);
+    }
+
+    return record;
+  }, [fuelConsumptionRules, addToOfflineQueue]);
+
+  const saveFuelConsumptionRulesBatch = useCallback((payload: {
+    rules: Array<Omit<FuelConsumptionRule, 'id'> & { id?: string }>;
+    deleteRuleIds?: string[];
+  }): FuelConsumptionRule[] => {
+    const nowIso = new Date().toISOString();
+    const deleteSet = new Set((payload.deleteRuleIds || []).filter(id => id && id !== 'fcr_default'));
+
+    const preparedRules: FuelConsumptionRule[] = (payload.rules || []).map(ruleData => {
+      const normalizedPlate = String(ruleData.plate).trim().toUpperCase() === 'DEFAULT'
+        ? 'DEFAULT'
+        : String(ruleData.plate).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const existing = fuelConsumptionRules.find(
+        r => (ruleData.id && r.id === ruleData.id) || r.plate.toUpperCase() === normalizedPlate
+      );
+      return {
+        id: existing?.id || ruleData.id || (normalizedPlate === 'DEFAULT' ? 'fcr_default' : `fcr_${normalizedPlate}_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`),
+        plate: normalizedPlate,
+        minConsumption: Number(ruleData.minConsumption),
+        avgConsumption: Number(ruleData.avgConsumption),
+        maxConsumption: Number(ruleData.maxConsumption),
+        updatedAt: nowIso
+      };
+    });
+
+    const preparedPlates = new Set(preparedRules.map(r => r.plate));
+    const preparedIds = new Set(preparedRules.map(r => r.id));
+
+    setFuelConsumptionRules(prev => {
+      const kept = prev.filter(
+        r => !deleteSet.has(r.id) && !preparedIds.has(r.id) && !preparedPlates.has(r.plate.toUpperCase())
+      );
+      const next = [...kept, ...preparedRules];
+      safeLocalStorageSet(STORAGE_KEYS.FUEL_RULES, JSON.stringify(next));
+      return next;
+    });
+
+    deleteSet.forEach(id => recordDeletedId(id));
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      preparedRules.forEach(record => {
+        addToOfflineQueue({
+          id: record.id,
+          type: 'fuel-rule',
+          action: 'save',
+          data: record,
+          timestamp: Date.now()
+        });
+      });
+      deleteSet.forEach(id => {
+        addToOfflineQueue({
+          id,
+          type: 'fuel-rule',
+          action: 'delete',
+          data: { id },
+          timestamp: Date.now()
+        });
+      });
+    } else {
+      api.saveFuelConsumptionRulesBatch({
+        rules: preparedRules,
+        deleteRuleIds: Array.from(deleteSet)
+      }).catch(() => {
+        preparedRules.forEach(record => {
+          addToOfflineQueue({
+            id: record.id,
+            type: 'fuel-rule',
+            action: 'save',
+            data: record,
+            timestamp: Date.now()
+          });
+        });
+        deleteSet.forEach(id => {
+          addToOfflineQueue({
+            id,
+            type: 'fuel-rule',
+            action: 'delete',
+            data: { id },
+            timestamp: Date.now()
+          });
+        });
+      });
+      preparedRules.forEach(record => cloudLiveSync.publish('FUEL_RULE_SAVED', record));
+      deleteSet.forEach(id => cloudLiveSync.publish('FUEL_RULE_DELETED', { id }));
+    }
+
+    return preparedRules;
+  }, [fuelConsumptionRules, addToOfflineQueue, recordDeletedId]);
+
+  const deleteFuelConsumptionRule = useCallback(async (id: string) => {
+    if (id === 'fcr_default') return;
+    setFuelConsumptionRules(prev => {
+      const next = prev.filter(r => r.id !== id);
+      safeLocalStorageSet(STORAGE_KEYS.FUEL_RULES, JSON.stringify(next));
+      return next;
+    });
+    recordDeletedId(id);
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      addToOfflineQueue({
+        id,
+        type: 'fuel-rule',
+        action: 'delete',
+        data: { id },
+        timestamp: Date.now()
+      });
+    } else {
+      api.deleteFuelConsumptionRule(id).catch(() => {});
+      cloudLiveSync.publish('FUEL_RULE_DELETED', { id });
+    }
+  }, [recordDeletedId, addToOfflineQueue]);
+
   // NR-13 & Metrologia (Laudos e Calibrações) actions
   const saveNR13Report = useCallback(async (rep: NR13InspectionReport) => {
     setNr13Reports(prev => {
@@ -3053,6 +3529,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         vehicles,
         drones,
         fleetMonthlyUpdates,
+        fuelLogs,
+        fuelConsumptionRules,
         nr13Reports,
         nr13Vessels,
         valveCalibrations,
@@ -3099,6 +3577,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         safeLocalStorageSet(STORAGE_KEYS.FLEET_MONTHLY_UPDATES, JSON.stringify(parsed.fleetMonthlyUpdates));
       }
 
+      if (Array.isArray(parsed.fuelLogs)) {
+        setFuelLogs(parsed.fuelLogs);
+        safeLocalStorageSet(STORAGE_KEYS.FUEL_LOGS, JSON.stringify(parsed.fuelLogs));
+      }
+
+      if (Array.isArray(parsed.fuelConsumptionRules) && parsed.fuelConsumptionRules.length > 0) {
+        setFuelConsumptionRules(parsed.fuelConsumptionRules);
+        safeLocalStorageSet(STORAGE_KEYS.FUEL_RULES, JSON.stringify(parsed.fuelConsumptionRules));
+      }
+
       if (Array.isArray(parsed.nr13Vessels) && parsed.nr13Vessels.length > 0) {
         setNr13Vessels(parsed.nr13Vessels);
         safeLocalStorageSet(STORAGE_KEYS.NR13_VESSELS, JSON.stringify(parsed.nr13Vessels));
@@ -3140,7 +3628,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Delete modal triggers
-  const requestDelete = (params: { type: 'checklist' | 'work-order' | 'fleet-update' | 'service-request'; id: string; code: string; description?: string }) => {
+  const requestDelete = (params: { type: 'checklist' | 'work-order' | 'fleet-update' | 'service-request' | 'fuel-log'; id: string; code: string; description?: string }) => {
     setDeleteModalState({
       isOpen: true,
       ...params
@@ -3161,6 +3649,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await deleteFleetMonthlyUpdate(id);
     } else if (type === 'service-request') {
       await deleteServiceRequest(id);
+    } else if (type === 'fuel-log') {
+      await deleteFuelLog(id);
     }
     setDeleteModalState(prev => ({ ...prev, isOpen: false }));
   };
@@ -3247,11 +3737,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setShowFleetUpdateFormModal,
         fleetFormMode,
         setFleetFormMode,
+        fleetListTab,
+        setFleetListTab,
         startNewFleetAction,
         addFleetMonthlyUpdate,
         deleteFleetMonthlyUpdate,
         acknowledgeFleetSinistro,
         unacknowledgeFleetSinistro,
+        fuelLogs,
+        fuelConsumptionRules,
+        saveFuelLog,
+        deleteFuelLog,
+        saveFuelConsumptionRule,
+        saveFuelConsumptionRulesBatch,
+        deleteFuelConsumptionRule,
         nr13Reports,
         saveNR13Report,
         deleteNR13Report,

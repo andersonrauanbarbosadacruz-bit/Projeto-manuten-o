@@ -27,7 +27,11 @@ export interface SyncMessage {
     | 'OPERATOR_RELEASE_SAVED'
     | 'OPERATOR_RELEASE_DELETED'
     | 'DRONE_SAVED'
-    | 'DRONE_DELETED';
+    | 'DRONE_DELETED'
+    | 'FUEL_LOG_SAVED'
+    | 'FUEL_LOG_DELETED'
+    | 'FUEL_RULE_SAVED'
+    | 'FUEL_RULE_DELETED';
   timestamp: string;
   sourceDevice: string;
   data: any;

@@ -90,7 +90,8 @@ export const INITIAL_VEHICLES: Vehicle[] = [
   { id: 'v_36', model: 'RENEGADE', plate: 'UHO2D78' },
   { id: 'v_37', model: 'RENEGADE', plate: 'UHP0C04' },
   { id: 'v_38', model: 'RENEGADE', plate: 'UHP3D26' },
-  { id: 'v_39', model: 'COMPASS', plate: 'UHP5B82' }
+  { id: 'v_39', model: 'COMPASS', plate: 'UHP5B82' },
+  { id: 'v_temp_aaa0a00', model: 'VEÍCULO TEMPORÁRIO', plate: 'AAA0A00', isTemporary: true }
 ];
 
 export const INITIAL_DRONES: DroneAsset[] = [

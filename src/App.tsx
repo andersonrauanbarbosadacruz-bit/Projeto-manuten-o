@@ -200,6 +200,8 @@ const AppContent: React.FC = () => {
             ? 'Excluir Atualização Mensal do Veículo?'
             : deleteModalState.type === 'service-request'
             ? 'Excluir Solicitação de Serviço?'
+            : deleteModalState.type === 'fuel-log'
+            ? 'Excluir Registro de Abastecimento?'
             : 'Excluir Ordem de Serviço?'
         }
         itemCode={deleteModalState.code}

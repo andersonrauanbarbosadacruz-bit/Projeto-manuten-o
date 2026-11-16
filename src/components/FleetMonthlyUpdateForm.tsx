@@ -19,17 +19,20 @@ import {
   Trash2,
   Eye,
   ClipboardCheck,
-  Plane
+  Plane,
+  Fuel
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Farm, FARMS, VehicleVisualInspection, ChecklistRecord } from '../types';
 import { VehicleVisualEvaluation } from './VehicleVisualEvaluation';
 import { ChecklistForm } from './ChecklistForm';
+import { FuelLogForm } from './FuelLogForm';
 import { compressImage } from '../utils/imageCompressor';
 
 interface FleetMonthlyUpdateFormProps {
   onSuccess?: () => void;
   onChecklistSuccess?: (created: ChecklistRecord) => void;
+  onFuelSuccess?: () => void;
   onCancel?: () => void;
   isModal?: boolean;
   leanMode?: boolean;
@@ -38,6 +41,7 @@ interface FleetMonthlyUpdateFormProps {
 export const FleetMonthlyUpdateForm: React.FC<FleetMonthlyUpdateFormProps> = ({
   onSuccess,
   onChecklistSuccess,
+  onFuelSuccess,
   onCancel,
   isModal = false,
   leanMode = false
@@ -55,7 +59,8 @@ export const FleetMonthlyUpdateForm: React.FC<FleetMonthlyUpdateFormProps> = ({
     setPreviewImage,
     setShowFleetUpdateFormModal,
     fleetFormMode,
-    setFleetFormMode
+    setFleetFormMode,
+    setFleetListTab
   } = useApp() as any;
 
   // Farm selection
@@ -299,8 +304,8 @@ export const FleetMonthlyUpdateForm: React.FC<FleetMonthlyUpdateFormProps> = ({
         </>
       )}
 
-      {/* Mode Switcher: Atualização Mensal | Checklist de Veículo | Drone Agrícola */}
-      <div className="bg-white rounded-2xl p-2 border border-slate-200 shadow-2xs grid grid-cols-1 sm:grid-cols-3 gap-2">
+      {/* Mode Switcher: Atualização Mensal | Abastecimento | Checklist de Veículo | Drone Agrícola */}
+      <div className="bg-white rounded-2xl p-2 border border-slate-200 shadow-2xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
         <button
           type="button"
           onClick={() => setFleetFormMode('UPDATE')}
@@ -319,6 +324,28 @@ export const FleetMonthlyUpdateForm: React.FC<FleetMonthlyUpdateFormProps> = ({
             <div className="text-xs sm:text-sm font-extrabold truncate">Atualização Mensal</div>
             <div className={`text-[10px] truncate ${fleetFormMode === 'UPDATE' ? 'text-cyan-100' : 'text-slate-500'}`}>
               KM, preventivas, sinistro e 4 fotos
+            </div>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFleetFormMode('FUEL')}
+          className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center space-x-3 ${
+            fleetFormMode === 'FUEL'
+              ? 'bg-emerald-700 text-white border-emerald-800 shadow-sm'
+              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+          }`}
+        >
+          <div className={`p-2 rounded-lg shrink-0 ${
+            fleetFormMode === 'FUEL' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+          }`}>
+            <Fuel className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs sm:text-sm font-extrabold truncate">Abastecimento</div>
+            <div className={`text-[10px] truncate ${fleetFormMode === 'FUEL' ? 'text-emerald-100' : 'text-slate-500'}`}>
+              Combustível, litros, KM e consumo
             </div>
           </div>
         </button>
@@ -368,7 +395,20 @@ export const FleetMonthlyUpdateForm: React.FC<FleetMonthlyUpdateFormProps> = ({
         </button>
       </div>
 
-      {fleetFormMode === 'CHECKLIST' ? (
+      {fleetFormMode === 'FUEL' ? (
+        <FuelLogForm
+          leanMode={leanMode}
+          onSuccess={() => {
+            if (onFuelSuccess) {
+              onFuelSuccess();
+            } else {
+              setFleetListTab('FUEL');
+              setActiveTab('fleet-updates');
+            }
+          }}
+          onCancel={handleClose}
+        />
+      ) : fleetFormMode === 'CHECKLIST' ? (
         <ChecklistForm
           forcedType="VEICULO"
           leanMode={leanMode}

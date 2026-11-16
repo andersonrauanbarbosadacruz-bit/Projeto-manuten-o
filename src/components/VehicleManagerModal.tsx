@@ -20,6 +20,7 @@ export const VehicleManagerModal: React.FC<VehicleManagerModalProps> = ({
   const [newModel, setNewModel] = useState('');
   const [newPlate, setNewPlate] = useState('');
   const [newFarm, setNewFarm] = useState<Farm | ''>('');
+  const [newIsTemporary, setNewIsTemporary] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -56,13 +57,15 @@ export const VehicleManagerModal: React.FC<VehicleManagerModalProps> = ({
     const created = addVehicle({
       model: modelClean,
       plate: plateClean,
-      farm: newFarm || undefined
+      farm: newFarm || undefined,
+      isTemporary: newIsTemporary || plateClean === 'AAA0A00'
     });
 
     setSuccessMsg(`Veículo ${created.model} - ${created.plate} cadastrado com sucesso!`);
     setNewPlate('');
     setNewModel('');
     setNewFarm('');
+    setNewIsTemporary(false);
 
     if (onSelectVehicle) {
       onSelectVehicle(created.plate, created.model);
@@ -163,6 +166,18 @@ export const VehicleManagerModal: React.FC<VehicleManagerModalProps> = ({
                 </div>
               </div>
 
+              <label className="flex items-start space-x-2 text-xs text-slate-700 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={newIsTemporary}
+                  onChange={e => setNewIsTemporary(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600"
+                />
+                <span>
+                  <strong>Veículo Temporário</strong> — sem parâmetro de consumo e sem obrigatoriedade de KM no abastecimento (ex: <code className="font-mono">AAA0A00</code>)
+                </span>
+              </label>
+
               <div className="flex justify-end pt-1">
                 <button
                   type="submit"
@@ -208,7 +223,14 @@ export const VehicleManagerModal: React.FC<VehicleManagerModalProps> = ({
                 ) : (
                   filtered.map(v => (
                     <tr key={v.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="py-2.5 px-3 font-bold text-slate-900">{v.model}</td>
+                      <td className="py-2.5 px-3 font-bold text-slate-900">
+                        <div>{v.model}</div>
+                        {(v.isTemporary || v.plate.toUpperCase() === 'AAA0A00') && (
+                          <div className="text-[10px] font-semibold text-amber-700">
+                            Temporário · Sem parâmetro de consumo e KM livre
+                          </div>
+                        )}
+                      </td>
                       <td className="py-2.5 px-3 font-mono font-extrabold text-emerald-800 bg-emerald-50/50">
                         {v.plate}
                       </td>

@@ -11,12 +11,15 @@ import {
   ShieldAlert,
   Eye,
   ClipboardCheck,
-  Plane
+  Plane,
+  Fuel
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { ServiceRequestPortal } from './ServiceRequestPortal';
 import { FleetMonthlyUpdateForm } from './FleetMonthlyUpdateForm';
+import { FuelPlateCorrectionModal } from './FuelPlateCorrectionModal';
 import { getChecklistEffectiveStatus } from '../utils/complianceHelper';
+import { enrichFuelLogsWithConsumption, formatDatePtBr, formatNumberPtBr } from '../utils/fuelConsumptionHelper';
 
 export const LeanModulesPortal: React.FC = () => {
   const {
@@ -25,6 +28,9 @@ export const LeanModulesPortal: React.FC = () => {
     isFarmLocked,
     selectedFarmFilter,
     fleetMonthlyUpdates,
+    fuelLogs,
+    fuelConsumptionRules,
+    vehicles,
     checklists,
     workOrders,
     isOnline,
@@ -39,8 +45,9 @@ export const LeanModulesPortal: React.FC = () => {
 
   const [activeModule, setActiveModule] = useState<'SS' | 'FLEET'>(hasSS ? 'SS' : 'FLEET');
   const [fleetSubTab, setFleetSubTab] = useState<'FORM' | 'SENT'>('FORM');
-  const [fleetSubmittedType, setFleetSubmittedType] = useState<'UPDATE' | 'CHECKLIST' | 'DRONE' | null>(null);
-  const [sentFilterTab, setSentFilterTab] = useState<'UPDATES' | 'CHECKLISTS' | 'DRONES'>('UPDATES');
+  const [fleetSubmittedType, setFleetSubmittedType] = useState<'UPDATE' | 'CHECKLIST' | 'DRONE' | 'FUEL' | null>(null);
+  const [sentFilterTab, setSentFilterTab] = useState<'UPDATES' | 'FUEL' | 'CHECKLISTS' | 'DRONES'>('UPDATES');
+  const [fuelCorrectionPlate, setFuelCorrectionPlate] = useState<string | null>(null);
 
   const activeFarmScope = lockedFarm || (selectedFarmFilter !== 'TODAS' ? selectedFarmFilter : null);
 
@@ -49,6 +56,16 @@ export const LeanModulesPortal: React.FC = () => {
     if (!activeFarmScope) return list;
     return list.filter(u => u.farm === activeFarmScope);
   }, [fleetMonthlyUpdates, activeFarmScope]);
+
+  const farmFuelLogs = useMemo(() => {
+    const enriched = enrichFuelLogsWithConsumption(fuelLogs || [], fuelConsumptionRules || [], vehicles);
+    const sorted = [...enriched].sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      return (Number(b.km) || 0) - (Number(a.km) || 0);
+    });
+    if (!activeFarmScope) return sorted;
+    return sorted.filter(f => f.location === activeFarmScope || f.location === 'Posto L3' || f.location === 'Posto Raul Lins');
+  }, [fuelLogs, fuelConsumptionRules, vehicles, activeFarmScope]);
 
   const farmVehicleChecklists = useMemo(() => {
     const list = (checklists || []).filter(c => c && c.type === 'VEICULO');
@@ -62,7 +79,7 @@ export const LeanModulesPortal: React.FC = () => {
     return list.filter(c => c.farm === activeFarmScope);
   }, [checklists, activeFarmScope]);
 
-  const totalSentCount = farmUpdates.length + farmVehicleChecklists.length + farmDroneChecklists.length;
+  const totalSentCount = farmUpdates.length + farmFuelLogs.length + farmVehicleChecklists.length + farmDroneChecklists.length;
 
   // If ONLY Solicitação de Serviço is enabled, render its dedicated ultra-lean standalone portal
   if (hasSS && !hasFleet) {
@@ -200,6 +217,8 @@ export const LeanModulesPortal: React.FC = () => {
                         ? 'Checklist de Veículo Registrado!'
                         : fleetSubmittedType === 'DRONE'
                         ? 'Checklist de Drone Registrado!'
+                        : fleetSubmittedType === 'FUEL'
+                        ? 'Abastecimento Registrado!'
                         : 'Atualização Mensal Registrada!'}
                     </h2>
                     <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
@@ -207,6 +226,8 @@ export const LeanModulesPortal: React.FC = () => {
                         ? 'O checklist completo, as fotos e a assinatura digital foram salvos e sincronizados com a base.'
                         : fleetSubmittedType === 'DRONE'
                         ? 'A inspeção do Drone Agrícola e as fotos dos 12 itens foram salvas e sincronizadas com a base.'
+                        : fleetSubmittedType === 'FUEL'
+                        ? 'Os dados do abastecimento, quilometragem e consumo calculado foram salvos e sincronizados.'
                         : 'Os dados de quilometragem, condutor e fotos dos 4 ângulos foram salvos e sincronizados.'}
                     </p>
                   </div>
@@ -227,6 +248,8 @@ export const LeanModulesPortal: React.FC = () => {
                             ? 'CHECKLISTS'
                             : fleetSubmittedType === 'DRONE'
                             ? 'DRONES'
+                            : fleetSubmittedType === 'FUEL'
+                            ? 'FUEL'
                             : 'UPDATES'
                         );
                         setFleetSubTab('SENT');
@@ -242,6 +265,7 @@ export const LeanModulesPortal: React.FC = () => {
                 <FleetMonthlyUpdateForm
                   leanMode
                   onSuccess={() => setFleetSubmittedType('UPDATE')}
+                  onFuelSuccess={() => setFleetSubmittedType('FUEL')}
                   onChecklistSuccess={(created) =>
                     setFleetSubmittedType(created.type === 'DRONE' ? 'DRONE' : 'CHECKLIST')
                   }
@@ -253,11 +277,11 @@ export const LeanModulesPortal: React.FC = () => {
                   <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
                     Histórico de Frota{activeFarmScope ? ` — ${activeFarmScope}` : ''}
                   </h2>
-                  <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl">
+                  <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl">
                     <button
                       type="button"
                       onClick={() => setSentFilterTab('UPDATES')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                         sentFilterTab === 'UPDATES'
                           ? 'bg-cyan-700 text-white shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
@@ -267,8 +291,19 @@ export const LeanModulesPortal: React.FC = () => {
                     </button>
                     <button
                       type="button"
+                      onClick={() => setSentFilterTab('FUEL')}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        sentFilterTab === 'FUEL'
+                          ? 'bg-emerald-700 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Abastec. ({farmFuelLogs.length})
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setSentFilterTab('CHECKLISTS')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                         sentFilterTab === 'CHECKLISTS'
                           ? 'bg-slate-900 text-white shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
@@ -279,7 +314,7 @@ export const LeanModulesPortal: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setSentFilterTab('DRONES')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                         sentFilterTab === 'DRONES'
                           ? 'bg-indigo-700 text-white shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
@@ -290,7 +325,66 @@ export const LeanModulesPortal: React.FC = () => {
                   </div>
                 </div>
 
-                {sentFilterTab === 'DRONES' ? (
+                {sentFilterTab === 'FUEL' ? (
+                  farmFuelLogs.length === 0 ? (
+                    <div className="py-10 text-center space-y-2.5">
+                      <Fuel className="w-10 h-10 text-emerald-300 mx-auto" />
+                      <p className="text-sm font-bold text-slate-700">
+                        Nenhum abastecimento registrado ainda
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFleetSubmittedType(null);
+                          setFleetSubTab('FORM');
+                        }}
+                        className="inline-flex items-center space-x-1.5 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        <PlusCircle className="w-4 h-4" />
+                        <span>Registrar Abastecimento</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {farmFuelLogs.map(log => (
+                        <div
+                          key={log.id}
+                          onClick={() => setFuelCorrectionPlate(log.plate)}
+                          className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 hover:border-emerald-400 cursor-pointer transition-colors flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                              <span className="font-mono font-bold text-slate-800">{log.code}</span>
+                              <span className="text-slate-400">·</span>
+                              <span className="font-mono font-black text-slate-900">{log.plate}</span>
+                              <span className="text-slate-400">·</span>
+                              <span className="font-semibold text-slate-700">{log.fuelType}</span>
+                            </div>
+                            <div className="text-xs text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-0.5 tabular-nums">
+                              <span>Condutor: <strong>{log.driver}</strong></span>
+                              <span className="font-mono font-bold">{formatNumberPtBr(Number(log.liters), 1)} L</span>
+                              <span className="font-mono">
+                                {Number(log.km) > 0 ? `${Number(log.km).toLocaleString('pt-BR')} KM` : 'KM livre'}
+                              </span>
+                              {log.status === 'TEMPORARY_EXEMPT' ? (
+                                <span className="font-semibold text-amber-700">Temporário (Livre)</span>
+                              ) : log.consumptionKmPerL !== undefined ? (
+                                <span className="font-mono font-bold text-emerald-700">
+                                  {formatNumberPtBr(log.consumptionKmPerL, 2)} km/L
+                                </span>
+                              ) : null}
+                              <span>{formatDatePtBr(log.date)} · {log.location}</span>
+                            </div>
+                          </div>
+                          <span className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-emerald-800 text-xs font-bold shrink-0">
+                            <Eye className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Placa</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                ) : sentFilterTab === 'DRONES' ? (
                   farmDroneChecklists.length === 0 ? (
                     <div className="py-10 text-center space-y-2.5">
                       <Plane className="w-10 h-10 text-indigo-300 mx-auto" />
@@ -479,6 +573,11 @@ export const LeanModulesPortal: React.FC = () => {
           </div>
         )}
       </main>
+      <FuelPlateCorrectionModal
+        isOpen={Boolean(fuelCorrectionPlate)}
+        plate={fuelCorrectionPlate || ''}
+        onClose={() => setFuelCorrectionPlate(null)}
+      />
     </div>
   );
 };
