@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix AgroCheck \u0026 OS - Gestão Agrícola",
+  "description": "Sistema de Checklist e Ordens de Serviço para manutenção interna das fazendas Vale das Uvas, Brasil Uvas, Labrunier 1 e Labrunier 2.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
