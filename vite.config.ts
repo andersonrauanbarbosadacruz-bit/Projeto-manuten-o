@@ -15,9 +15,11 @@ export default defineConfig(() => {
         includeAssets: [
           'favicon.ico',
           'apple-touch-icon.png',
-          'apple-touch-icon-v6.png',
-          'pwa-icon-512-v6.png',
-          'pwa-icon-maskable-512-v6.png',
+          'apple-touch-icon-v7.png',
+          'apple-touch-icon-180-v7.png',
+          'pwa-icon-192-v7.png',
+          'pwa-icon-512-v7.png',
+          'pwa-icon-maskable-512-v7.png',
         ],
         manifest: {
           id: '/',
@@ -32,13 +34,19 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: '/pwa-icon-512-v6.png',
+              src: '/pwa-icon-192-v7.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: '/pwa-icon-512-v7.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-icon-maskable-512-v6.png',
+              src: '/pwa-icon-maskable-512-v7.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -51,7 +59,12 @@ export default defineConfig(() => {
           cleanupOutdatedCaches: true,
           navigateFallback: null,
           globPatterns: ['**/*.{js,css,ico,png,jpg,svg,woff,woff2}'],
-          globIgnores: ['**/index.html', '**/manifest.webmanifest', '**/assets/aistudio/transferir*'],
+          globIgnores: [
+            '**/index.html',
+            '**/manifest.webmanifest',
+            '**/assets/aistudio/transferir*',
+            '**/assets/aistudio/a2e9e992*',
+          ],
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
           runtimeCaching: [
             {

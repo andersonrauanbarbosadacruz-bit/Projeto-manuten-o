@@ -1692,7 +1692,8 @@ async function startServer() {
         req.path.endsWith('/registerSW.js') ||
         req.path.endsWith('/manifest.webmanifest') ||
         req.path.includes('apple-touch-icon') ||
-        req.path.includes('pwa-')
+        req.path.includes('pwa-') ||
+        req.path.includes('favicon')
       )
     ) {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
