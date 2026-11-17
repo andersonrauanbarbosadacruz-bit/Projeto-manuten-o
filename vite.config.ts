@@ -14,12 +14,10 @@ export default defineConfig(() => {
         useCredentials: true,
         includeAssets: [
           'apple-touch-icon.png',
-          'apple-touch-icon-v4.png',
-          'pwa-icon-192-v4.png',
-          'pwa-icon-512-v4.png',
-          'pwa-icon-1024-v4.png',
-          'pwa-icon-maskable-512-v4.png',
-          'pwa-icon-maskable-1024-v4.png',
+          'apple-touch-icon-v5.png',
+          'pwa-icon-512-v5.png',
+          'pwa-icon-1254-v5.png',
+          'pwa-icon-maskable-1024-v5.png',
         ],
         manifest: {
           id: '/',
@@ -34,32 +32,20 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: '/pwa-icon-1024-v4.png',
-              sizes: '1024x1024',
+              src: '/pwa-icon-1254-v5.png',
+              sizes: '1254x1254',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-icon-512-v4.png',
+              src: '/pwa-icon-512-v5.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-icon-192-v4.png',
-              sizes: '192x192',
-              type: 'image/png',
-              purpose: 'any',
-            },
-            {
-              src: '/pwa-icon-maskable-1024-v4.png',
+              src: '/pwa-icon-maskable-1024-v5.png',
               sizes: '1024x1024',
-              type: 'image/png',
-              purpose: 'maskable',
-            },
-            {
-              src: '/pwa-icon-maskable-512-v4.png',
-              sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
             },
