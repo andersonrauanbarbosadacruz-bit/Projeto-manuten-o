@@ -54,7 +54,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ compact = fa
             <div className="bg-emerald-900 text-white px-5 py-4 flex items-center justify-between gap-3">
               <div className="flex items-center space-x-3 min-w-0">
                 <img
-                  src="/pwa-icon-192-v3.png"
+                  src="/pwa-icon-512-v4.png"
                   alt="Gestão Manutenção"
                   className="w-11 h-11 rounded-xl bg-white p-0.5 object-contain shadow-sm shrink-0"
                 />
