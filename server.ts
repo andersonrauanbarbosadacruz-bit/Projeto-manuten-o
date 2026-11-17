@@ -2,7 +2,6 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { INITIAL_CHECKLISTS, INITIAL_WORK_ORDERS, INITIAL_FLEET_UPDATES, INITIAL_DRONES } from './src/data/initialData';
 import {
   INITIAL_NR13_REPORTS,
@@ -1692,7 +1691,8 @@ async function startServer() {
   });
 
   if (!isProd) {
-    // Mount Vite dev server middlewares
+    // Mount Vite dev server middlewares dynamically only in development
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'

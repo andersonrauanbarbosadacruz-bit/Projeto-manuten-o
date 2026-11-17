@@ -40,6 +40,16 @@ import { api } from '../api/client';
 import { safeLocalStorageSet } from '../utils/imageCompressor';
 import { syncManager, decodeSyncPayload, SyncPayload, PeerStatus } from '../utils/syncManager';
 import { cloudLiveSync } from '../utils/cloudLiveSync';
+import { useFirebase } from './FirebaseContext';
+import {
+  saveToFirestore,
+  deleteFromFirestore,
+  removeTombstoneFromFirestore,
+  subscribeCollection,
+  seedCollectionIfEmpty,
+  fetchDeletedTombstones,
+  FirestoreCollectionName
+} from '../services/firestoreSync';
 
 interface DeleteModalState {
   isOpen: boolean;
@@ -279,6 +289,17 @@ const safeStorageRemove = (key: string): void => {
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthReady, isAuthenticated } = useFirebase();
+  const isAuthenticatedRef = useRef<boolean>(isAuthenticated);
+  useEffect(() => {
+    isAuthenticatedRef.current = isAuthenticated;
+  }, [isAuthenticated]);
+
+  const draftCreatedAtRef = useRef<Record<string, string>>({});
+  const recentlyDeletedLocalRef = useRef<Set<string>>(new Set());
+  const firestoreMigratedRef = useRef<boolean>(false);
+  const firestoreNr13MigratedRef = useRef<boolean>(false);
+
   // Resolve initial role, lock state, and allowed modules deterministically.
   // Explicit URL query params ALWAYS override stale localStorage locks so opening a new QR/link switches cleanly.
   const [initialAccess] = useState<{ role: UserRole; locked: boolean; modules: AccessModule[] }>(() => {
@@ -550,7 +571,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   interface OfflineQueueItem {
     id: string;
-    type: 'checklist' | 'work-order' | 'fleet-update' | 'service-request' | 'fuel-log' | 'fuel-rule';
+    type:
+      | 'checklist'
+      | 'work-order'
+      | 'fleet-update'
+      | 'service-request'
+      | 'fuel-log'
+      | 'fuel-rule'
+      | 'vehicle'
+      | 'drone'
+      | 'operator-release';
     action: 'save' | 'delete';
     data: any;
     timestamp: number;
@@ -616,6 +646,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {}
   }, [vehicles]);
 
+  const syncSaveFirestore = useCallback((col: FirestoreCollectionName, id: string, data: any): Promise<void> => {
+    if (!isAuthenticatedRef.current || !id) return Promise.resolve();
+    return saveToFirestore(col, id, data).catch((err) => {
+      console.warn(`[Firestore] Falha ao salvar em ${col}/${id}:`, err);
+    });
+  }, []);
+
+  const syncDeleteFirestore = useCallback((col: FirestoreCollectionName, id: string, recordTombstone = true): Promise<void> => {
+    if (!isAuthenticatedRef.current || !id) return Promise.resolve();
+    return deleteFromFirestore(col, id, recordTombstone).catch((err) => {
+      console.warn(`[Firestore] Falha ao excluir ${col}/${id}:`, err);
+    });
+  }, []);
+
   const addVehicle = useCallback((v: Omit<Vehicle, 'id'>) => {
     const cleanPlate = v.plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     const newV: Vehicle = {
@@ -626,12 +670,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isTemporary: Boolean(v.isTemporary || cleanPlate === 'AAA0A00')
     };
     setVehicles(prev => [newV, ...prev]);
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      addToOfflineQueue({
+        id: newV.id,
+        type: 'vehicle',
+        action: 'save',
+        data: newV,
+        timestamp: Date.now()
+      });
+    } else {
+      syncSaveFirestore('vehicles', newV.id, newV);
+    }
     return newV;
-  }, []);
+  }, [syncSaveFirestore]);
 
   const deleteVehicle = useCallback((id: string) => {
+    recentlyDeletedLocalRef.current.add(id);
     setVehicles(prev => prev.filter(v => v.id !== id));
-  }, []);
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      addToOfflineQueue({
+        id,
+        type: 'vehicle',
+        action: 'delete',
+        data: { id },
+        timestamp: Date.now()
+      });
+    } else {
+      syncDeleteFirestore('vehicles', id, true);
+    }
+  }, [syncDeleteFirestore]);
 
   // Drone Management
   const [showDroneModal, setShowDroneModal] = useState(false);
@@ -676,20 +743,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       safeLocalStorageSet(STORAGE_KEYS.DRONES, JSON.stringify(next));
       return next;
     });
-    api.saveDrone(newDrone).catch(() => {});
-    cloudLiveSync.publish('DRONE_SAVED', newDrone);
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      addToOfflineQueue({
+        id: newDrone.id,
+        type: 'drone',
+        action: 'save',
+        data: newDrone,
+        timestamp: Date.now()
+      });
+    } else {
+      syncSaveFirestore('drones', newDrone.id, newDrone);
+      api.saveDrone(newDrone).catch(() => {});
+      cloudLiveSync.publish('DRONE_SAVED', newDrone);
+    }
     return newDrone;
-  }, []);
+  }, [syncSaveFirestore]);
 
   const deleteDrone = useCallback((id: string) => {
+    recentlyDeletedLocalRef.current.add(id);
     setDrones(prev => {
       const next = prev.filter(d => d.id !== id);
       safeLocalStorageSet(STORAGE_KEYS.DRONES, JSON.stringify(next));
       return next;
     });
-    api.deleteDrone(id).catch(() => {});
-    cloudLiveSync.publish('DRONE_DELETED', { id });
-  }, []);
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      addToOfflineQueue({
+        id,
+        type: 'drone',
+        action: 'delete',
+        data: { id },
+        timestamp: Date.now()
+      });
+    } else {
+      syncDeleteFirestore('drones', id, true);
+      api.deleteDrone(id).catch(() => {});
+      cloudLiveSync.publish('DRONE_DELETED', { id });
+    }
+  }, [syncDeleteFirestore]);
 
   // Monthly Fleet Updates ("Atualizações Mensais Veículos da Frota")
   const [fleetMonthlyUpdates, setFleetMonthlyUpdates] = useState<VehicleMonthlyUpdate[]>(() => {
@@ -999,42 +1089,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         if (item.action === 'save') {
           if (item.type === 'checklist') {
-            await api.saveChecklist(item.data);
+            if (isAuthenticatedRef.current) await saveToFirestore('checklists', item.id, item.data);
+            api.saveChecklist(item.data).catch(() => {});
             cloudLiveSync.publish('CHECKLIST_SAVED', item.data);
           } else if (item.type === 'fleet-update') {
-            await api.saveFleetMonthlyUpdate(item.data);
+            if (isAuthenticatedRef.current) await saveToFirestore('fleetMonthlyUpdates', item.id, item.data);
+            api.saveFleetMonthlyUpdate(item.data).catch(() => {});
             cloudLiveSync.publish('FLEET_UPDATE_SAVED', item.data);
           } else if (item.type === 'service-request') {
-            await api.saveServiceRequest(item.data);
+            if (isAuthenticatedRef.current) await saveToFirestore('serviceRequests', item.id, item.data);
+            api.saveServiceRequest(item.data).catch(() => {});
             cloudLiveSync.publish('SERVICE_REQUEST_SAVED', item.data);
           } else if (item.type === 'fuel-log') {
-            await api.saveFuelLog(item.data);
+            if (isAuthenticatedRef.current) await saveToFirestore('fuelLogs', item.id, item.data);
+            api.saveFuelLog(item.data).catch(() => {});
             cloudLiveSync.publish('FUEL_LOG_SAVED', item.data);
           } else if (item.type === 'fuel-rule') {
-            await api.saveFuelConsumptionRule(item.data);
+            if (isAuthenticatedRef.current) await saveToFirestore('fuelConsumptionRules', item.id, item.data);
+            api.saveFuelConsumptionRule(item.data).catch(() => {});
             cloudLiveSync.publish('FUEL_RULE_SAVED', item.data);
+          } else if (item.type === 'vehicle') {
+            if (isAuthenticatedRef.current) await saveToFirestore('vehicles', item.id, item.data);
+          } else if (item.type === 'drone') {
+            if (isAuthenticatedRef.current) await saveToFirestore('drones', item.id, item.data);
+            api.saveDrone(item.data).catch(() => {});
+            cloudLiveSync.publish('DRONE_SAVED', item.data);
+          } else if (item.type === 'operator-release') {
+            if (isAuthenticatedRef.current) await saveToFirestore('operatorServiceReleases', item.id, item.data);
+            api.saveOperatorRelease(item.data).catch(() => {});
+            cloudLiveSync.publish('OPERATOR_RELEASE_SAVED', item.data);
           } else {
-            await api.saveWorkOrder(item.data);
+            if (isAuthenticatedRef.current) await saveToFirestore('workOrders', item.id, item.data);
+            api.saveWorkOrder(item.data).catch(() => {});
             cloudLiveSync.publish('WORK_ORDER_SAVED', item.data);
           }
         } else if (item.action === 'delete') {
           if (item.type === 'checklist') {
-            await api.deleteChecklist(item.id);
+            if (isAuthenticatedRef.current) await deleteFromFirestore('checklists', item.id, true);
+            api.deleteChecklist(item.id).catch(() => {});
             cloudLiveSync.publish('CHECKLIST_DELETED', { id: item.id });
           } else if (item.type === 'fleet-update') {
-            await api.deleteFleetMonthlyUpdate(item.id);
+            if (isAuthenticatedRef.current) await deleteFromFirestore('fleetMonthlyUpdates', item.id, true);
+            api.deleteFleetMonthlyUpdate(item.id).catch(() => {});
             cloudLiveSync.publish('FLEET_UPDATE_DELETED', { id: item.id });
           } else if (item.type === 'service-request') {
-            await api.deleteServiceRequest(item.id);
+            if (isAuthenticatedRef.current) await deleteFromFirestore('serviceRequests', item.id, true);
+            api.deleteServiceRequest(item.id).catch(() => {});
             cloudLiveSync.publish('SERVICE_REQUEST_DELETED', { id: item.id });
           } else if (item.type === 'fuel-log') {
-            await api.deleteFuelLog(item.id);
+            if (isAuthenticatedRef.current) await deleteFromFirestore('fuelLogs', item.id, true);
+            api.deleteFuelLog(item.id).catch(() => {});
             cloudLiveSync.publish('FUEL_LOG_DELETED', { id: item.id });
           } else if (item.type === 'fuel-rule') {
-            await api.deleteFuelConsumptionRule(item.id);
+            if (isAuthenticatedRef.current) await deleteFromFirestore('fuelConsumptionRules', item.id, true);
+            api.deleteFuelConsumptionRule(item.id).catch(() => {});
             cloudLiveSync.publish('FUEL_RULE_DELETED', { id: item.id });
+          } else if (item.type === 'vehicle') {
+            if (isAuthenticatedRef.current) await deleteFromFirestore('vehicles', item.id, true);
+          } else if (item.type === 'drone') {
+            if (isAuthenticatedRef.current) await deleteFromFirestore('drones', item.id, true);
+            api.deleteDrone(item.id).catch(() => {});
+            cloudLiveSync.publish('DRONE_DELETED', { id: item.id });
+          } else if (item.type === 'operator-release') {
+            if (isAuthenticatedRef.current) await deleteFromFirestore('operatorServiceReleases', item.id, true);
+            api.deleteOperatorRelease(item.id).catch(() => {});
+            cloudLiveSync.publish('OPERATOR_RELEASE_DELETED', { id: item.id });
           } else {
-            await api.deleteWorkOrder(item.id);
+            if (isAuthenticatedRef.current) await deleteFromFirestore('workOrders', item.id, true);
+            api.deleteWorkOrder(item.id).catch(() => {});
             cloudLiveSync.publish('WORK_ORDER_DELETED', { id: item.id });
           }
         }
@@ -1077,6 +1199,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [deletedIds]);
 
   const recordDeletedId = useCallback((id: string) => {
+    recentlyDeletedLocalRef.current.add(id);
     setDeletedIds(prev => {
       if (prev.includes(id)) return prev;
       const next = [...prev, id];
@@ -1652,6 +1775,386 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [syncNow]);
 
+  const latestDataRef = useRef({
+    checklists,
+    workOrders,
+    fleetMonthlyUpdates,
+    fuelLogs,
+    fuelConsumptionRules,
+    vehicles,
+    drones,
+    serviceRequests,
+    operatorServiceReleases,
+    nr13Reports,
+    nr13Vessels,
+    valveCalibrations,
+    gaugeCalibrations,
+    ultrassomEquipments
+  });
+  latestDataRef.current = {
+    checklists,
+    workOrders,
+    fleetMonthlyUpdates,
+    fuelLogs,
+    fuelConsumptionRules,
+    vehicles,
+    drones,
+    serviceRequests,
+    operatorServiceReleases,
+    nr13Reports,
+    nr13Vessels,
+    valveCalibrations,
+    gaugeCalibrations,
+    ultrassomEquipments
+  };
+
+  // Real-time Firebase Firestore Sync & Initial Data Migration (no Gmail login required)
+  useEffect(() => {
+    if (!isAuthReady || !isAuthenticated) return;
+
+    let cancelled = false;
+    const unsubs: Array<() => void> = [];
+
+    const sortByCreatedDesc = <T extends { createdAt?: string }>(arr: T[]): T[] =>
+      [...arr].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+    const mergeForSeed = <T extends { id: string }>(
+      localArr: T[],
+      serverArr: T[] | undefined,
+      deletedSet: Set<string>
+    ): T[] => {
+      const map = new Map<string, T>();
+      (serverArr || []).forEach((item) => {
+        if (item && item.id && !deletedSet.has(item.id)) map.set(item.id, item);
+      });
+      (localArr || []).forEach((item) => {
+        if (item && item.id && !deletedSet.has(item.id) && !map.has(item.id)) {
+          map.set(item.id, item);
+        }
+      });
+      return Array.from(map.values());
+    };
+
+    const startSync = async () => {
+      try {
+        flushOfflineQueue();
+
+        const remoteTombstones = await fetchDeletedTombstones().catch(() => new Set<string>());
+        if (cancelled) return;
+
+        const serverSnapshot = !firestoreMigratedRef.current || (userRole === 'ADMIN' && !firestoreNr13MigratedRef.current)
+          ? await api.fetchAll().catch(() => null)
+          : null;
+        if (cancelled) return;
+
+        const combinedDeleted = new Set<string>([
+          ...deletedIdsRef.current,
+          ...(Array.isArray(serverSnapshot?.deletedIds) ? serverSnapshot.deletedIds : []),
+          ...Array.from(remoteTombstones)
+        ]);
+
+        const missingTombstones = Array.from(combinedDeleted).filter((id) => !remoteTombstones.has(id));
+        if (missingTombstones.length > 0) {
+          await Promise.allSettled(
+            missingTombstones.map((id) =>
+              saveToFirestore('deletedTombstones', id, { id, deletedAt: new Date().toISOString() })
+            )
+          );
+        }
+
+        const mergedDeletedArr = Array.from(combinedDeleted);
+        deletedIdsRef.current = mergedDeletedArr;
+        setDeletedIds(mergedDeletedArr);
+        safeLocalStorageSet(STORAGE_KEYS.DELETED_IDS, JSON.stringify(mergedDeletedArr));
+
+        const cur = latestDataRef.current;
+
+        if (!firestoreMigratedRef.current) {
+          firestoreMigratedRef.current = true;
+          await Promise.allSettled([
+            seedCollectionIfEmpty('vehicles', mergeForSeed(cur.vehicles, undefined, combinedDeleted), combinedDeleted),
+            seedCollectionIfEmpty('drones', mergeForSeed(cur.drones, serverSnapshot?.drones, combinedDeleted), combinedDeleted),
+            seedCollectionIfEmpty(
+              'fuelConsumptionRules',
+              mergeForSeed(cur.fuelConsumptionRules, serverSnapshot?.fuelConsumptionRules, combinedDeleted),
+              combinedDeleted
+            ),
+            seedCollectionIfEmpty('fuelLogs', mergeForSeed(cur.fuelLogs, serverSnapshot?.fuelLogs, combinedDeleted), combinedDeleted),
+            seedCollectionIfEmpty(
+              'fleetMonthlyUpdates',
+              mergeForSeed(cur.fleetMonthlyUpdates, serverSnapshot?.fleetMonthlyUpdates, combinedDeleted),
+              combinedDeleted
+            ),
+            seedCollectionIfEmpty('checklists', mergeForSeed(cur.checklists, serverSnapshot?.checklists, combinedDeleted), combinedDeleted),
+            seedCollectionIfEmpty('workOrders', mergeForSeed(cur.workOrders, serverSnapshot?.workOrders, combinedDeleted), combinedDeleted),
+            seedCollectionIfEmpty(
+              'serviceRequests',
+              mergeForSeed(cur.serviceRequests, serverSnapshot?.serviceRequests, combinedDeleted),
+              combinedDeleted
+            ),
+            seedCollectionIfEmpty(
+              'operatorServiceReleases',
+              mergeForSeed(cur.operatorServiceReleases, serverSnapshot?.operatorServiceReleases, combinedDeleted),
+              combinedDeleted
+            )
+          ]);
+        }
+
+        if (userRole === 'ADMIN' && !firestoreNr13MigratedRef.current) {
+          firestoreNr13MigratedRef.current = true;
+          await Promise.allSettled([
+            seedCollectionIfEmpty(
+              'nr13Reports',
+              mergeForSeed(cur.nr13Reports, serverSnapshot?.nr13Reports, combinedDeleted),
+              combinedDeleted
+            ),
+            seedCollectionIfEmpty(
+              'nr13Vessels',
+              mergeForSeed(cur.nr13Vessels, serverSnapshot?.nr13Vessels, combinedDeleted),
+              combinedDeleted
+            ),
+            seedCollectionIfEmpty(
+              'valveCalibrations',
+              mergeForSeed(cur.valveCalibrations, serverSnapshot?.valveCalibrations, combinedDeleted),
+              combinedDeleted
+            ),
+            seedCollectionIfEmpty(
+              'gaugeCalibrations',
+              mergeForSeed(cur.gaugeCalibrations, serverSnapshot?.gaugeCalibrations, combinedDeleted),
+              combinedDeleted
+            ),
+            seedCollectionIfEmpty(
+              'ultrassomEquipments',
+              mergeForSeed(cur.ultrassomEquipments, serverSnapshot?.ultrassomEquipments, combinedDeleted),
+              combinedDeleted
+            )
+          ]);
+        }
+
+        if (cancelled) return;
+
+        // 1. Deleted tombstones subscription
+        unsubs.push(
+          subscribeCollection<{ id: string }>('deletedTombstones', (items) => {
+            if (cancelled) return;
+            const mergedSet = new Set<string>([
+              ...items.map((t) => t.id),
+              ...Array.from(recentlyDeletedLocalRef.current)
+            ]);
+            const merged = Array.from(mergedSet);
+            deletedIdsRef.current = merged;
+            setDeletedIds(merged);
+            safeLocalStorageSet(STORAGE_KEYS.DELETED_IDS, JSON.stringify(merged));
+
+            setChecklists((prev) => prev.filter((c) => !mergedSet.has(c.id)));
+            setWorkOrders((prev) => prev.filter((w) => !mergedSet.has(w.id)));
+            setFleetMonthlyUpdates((prev) => prev.filter((u) => !mergedSet.has(u.id)));
+            setFuelLogs((prev) => prev.filter((f) => !mergedSet.has(f.id)));
+            setServiceRequests((prev) => prev.filter((s) => !mergedSet.has(s.id)));
+            setOperatorServiceReleases((prev) => prev.filter((o) => !mergedSet.has(o.id)));
+            setDrones((prev) => prev.filter((d) => !mergedSet.has(d.id)));
+            setVehicles((prev) => prev.filter((v) => !mergedSet.has(v.id)));
+          })
+        );
+
+        // 2. Shared lightweight operational collections
+        unsubs.push(
+          subscribeCollection<Vehicle>('vehicles', (items) => {
+            if (cancelled) return;
+            const delSet = new Set(deletedIdsRef.current);
+            const filtered = items.filter((v) => v && v.id && !delSet.has(v.id));
+            if (filtered.length === 0) return;
+            const hasTemp = filtered.some(
+              (v) => String(v.plate || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '') === 'AAA0A00'
+            );
+            const finalVehicles = hasTemp
+              ? filtered.map((v) =>
+                  String(v.plate || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '') === 'AAA0A00'
+                    ? { ...v, isTemporary: true }
+                    : v
+                )
+              : [
+                  ...filtered,
+                  {
+                    id: 'v_temp_aaa0a00',
+                    model: 'VEÍCULO TEMPORÁRIO',
+                    plate: 'AAA0A00',
+                    isTemporary: true
+                  }
+                ];
+            setVehicles(finalVehicles);
+            safeLocalStorageSet(STORAGE_KEYS.VEHICLES, JSON.stringify(finalVehicles));
+          })
+        );
+
+        unsubs.push(
+          subscribeCollection<DroneAsset>('drones', (items) => {
+            if (cancelled) return;
+            const delSet = new Set(deletedIdsRef.current);
+            const filtered = items.filter((d) => d && d.id && !delSet.has(d.id));
+            if (filtered.length === 0) return;
+            setDrones(filtered);
+            safeLocalStorageSet(STORAGE_KEYS.DRONES, JSON.stringify(filtered));
+          })
+        );
+
+        unsubs.push(
+          subscribeCollection<FuelConsumptionRule>('fuelConsumptionRules', (items) => {
+            if (cancelled) return;
+            const delSet = new Set(deletedIdsRef.current);
+            const filtered = items.filter((r) => r && r.id && !delSet.has(r.id));
+            const hasDefault = filtered.some((r) => r.plate === 'DEFAULT' || r.id === 'fcr_default');
+            const finalRules = hasDefault ? filtered : [DEFAULT_FALLBACK_RULE, ...filtered];
+            setFuelConsumptionRules(finalRules);
+            safeLocalStorageSet(STORAGE_KEYS.FUEL_RULES, JSON.stringify(finalRules));
+          })
+        );
+
+        unsubs.push(
+          subscribeCollection<FuelLogRecord>('fuelLogs', (items) => {
+            if (cancelled) return;
+            const delSet = new Set(deletedIdsRef.current);
+            const filtered = sortByCreatedDesc(items.filter((f) => f && f.id && !delSet.has(f.id)));
+            setFuelLogs(filtered);
+            safeLocalStorageSet(STORAGE_KEYS.FUEL_LOGS, JSON.stringify(filtered));
+            setLastSyncTime(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+          })
+        );
+
+        unsubs.push(
+          subscribeCollection<ServiceRequest>('serviceRequests', (items) => {
+            if (cancelled) return;
+            const delSet = new Set(deletedIdsRef.current);
+            const filtered = sortByCreatedDesc(items.filter((s) => s && s.id && !delSet.has(s.id)));
+            setServiceRequests(filtered);
+            safeLocalStorageSet(STORAGE_KEYS.SERVICE_REQUESTS, JSON.stringify(filtered));
+            setViewServiceRequestDetail((curr) => (curr ? filtered.find((s) => s.id === curr.id) || curr : null));
+            setLastSyncTime(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+          })
+        );
+
+        unsubs.push(
+          subscribeCollection<OperatorServiceRelease>('operatorServiceReleases', (items) => {
+            if (cancelled) return;
+            const delSet = new Set(deletedIdsRef.current);
+            const filtered = sortByCreatedDesc(items.filter((o) => o && o.id && !delSet.has(o.id)));
+            setOperatorServiceReleases(filtered);
+            safeLocalStorageSet(STORAGE_KEYS.OPERATOR_RELEASES, JSON.stringify(filtered));
+          })
+        );
+
+        // 3. Field & Admin operational collections
+        if (userRole === 'ADMIN' || userRole === 'OPERADOR') {
+          unsubs.push(
+            subscribeCollection<VehicleMonthlyUpdate>('fleetMonthlyUpdates', (items) => {
+              if (cancelled) return;
+              const delSet = new Set(deletedIdsRef.current);
+              const filtered = sortByCreatedDesc(items.filter((u) => u && u.id && !delSet.has(u.id)));
+              setFleetMonthlyUpdates(filtered);
+              safeLocalStorageSet(STORAGE_KEYS.FLEET_MONTHLY_UPDATES, JSON.stringify(filtered));
+              setViewFleetUpdateDetail((curr) => (curr ? filtered.find((u) => u.id === curr.id) || curr : null));
+              setLastSyncTime(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+            })
+          );
+
+          unsubs.push(
+            subscribeCollection<ChecklistRecord>('checklists', (items) => {
+              if (cancelled) return;
+              const delSet = new Set(deletedIdsRef.current);
+              const filtered = sortByCreatedDesc(
+                items.filter((c) => c && c.id && Array.isArray(c.items) && !delSet.has(c.id))
+              );
+              setChecklists(filtered);
+              safeLocalStorageSet(STORAGE_KEYS.CHECKLISTS, JSON.stringify(filtered));
+              setViewChecklistDetail((curr) => (curr ? filtered.find((c) => c.id === curr.id) || curr : null));
+              setLastSyncTime(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+            })
+          );
+
+          unsubs.push(
+            subscribeCollection<WorkOrder>('workOrders', (items) => {
+              if (cancelled) return;
+              const delSet = new Set(deletedIdsRef.current);
+              const filtered = sortByCreatedDesc(items.filter((w) => w && w.id && !delSet.has(w.id)));
+              setWorkOrders(filtered);
+              safeLocalStorageSet(STORAGE_KEYS.WORK_ORDERS, JSON.stringify(filtered));
+              setViewWorkOrderDetail((curr) => (curr ? filtered.find((w) => w.id === curr.id) || curr : null));
+              setLastSyncTime(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+            })
+          );
+        }
+
+        // 4. Heavy NR-13 & Metrology collections (Admin-only to preserve mobile bandwidth & read quota)
+        if (userRole === 'ADMIN') {
+          unsubs.push(
+            subscribeCollection<NR13InspectionReport>('nr13Reports', (items) => {
+              if (cancelled) return;
+              const delSet = new Set(deletedIdsRef.current);
+              const filtered = sortByCreatedDesc(items.filter((r) => r && r.id && !delSet.has(r.id)));
+              setNr13Reports(filtered);
+              safeLocalStorageSet(STORAGE_KEYS.NR13_REPORTS, JSON.stringify(filtered));
+            })
+          );
+
+          unsubs.push(
+            subscribeCollection<NR13VesselMaster>('nr13Vessels', (items) => {
+              if (cancelled) return;
+              const delSet = new Set(deletedIdsRef.current);
+              const filtered = items.filter(
+                (v) => v && v.id && !delSet.has(v.id) && !LEGACY_SAMPLE_VESSEL_IDS.includes(v.id)
+              );
+              setNr13Vessels(filtered);
+              safeLocalStorageSet(STORAGE_KEYS.NR13_VESSELS, JSON.stringify(filtered));
+            })
+          );
+
+          unsubs.push(
+            subscribeCollection<ValveCalibrationRecord>('valveCalibrations', (items) => {
+              if (cancelled) return;
+              const delSet = new Set(deletedIdsRef.current);
+              const filtered = items.filter(
+                (v) => v && v.id && !delSet.has(v.id) && !LEGACY_SAMPLE_VALVE_IDS.includes(v.id)
+              );
+              setValveCalibrations(filtered);
+              safeLocalStorageSet(STORAGE_KEYS.VALVE_CALIBRATIONS, JSON.stringify(filtered));
+            })
+          );
+
+          unsubs.push(
+            subscribeCollection<GaugeCalibrationRecord>('gaugeCalibrations', (items) => {
+              if (cancelled) return;
+              const delSet = new Set(deletedIdsRef.current);
+              const filtered = items.filter(
+                (g) => g && g.id && !delSet.has(g.id) && !LEGACY_SAMPLE_GAUGE_IDS.includes(g.id)
+              );
+              setGaugeCalibrations(filtered);
+              safeLocalStorageSet(STORAGE_KEYS.GAUGE_CALIBRATIONS, JSON.stringify(filtered));
+            })
+          );
+
+          unsubs.push(
+            subscribeCollection<UltrassomEquipmentRecord>('ultrassomEquipments', (items) => {
+              if (cancelled) return;
+              const delSet = new Set(deletedIdsRef.current);
+              const filtered = items.filter((u) => u && u.id && !delSet.has(u.id));
+              setUltrassomEquipments(filtered);
+              safeLocalStorageSet(STORAGE_KEYS.ULTRASSOM_EQUIPMENTS, JSON.stringify(filtered));
+            })
+          );
+        }
+      } catch (err) {
+        console.warn('[Firestore] Erro na sincronização inicial:', err);
+      }
+    };
+
+    startSync();
+
+    return () => {
+      cancelled = true;
+      unsubs.forEach((u) => u());
+    };
+  }, [isAuthReady, isAuthenticated, userRole, flushOfflineQueue]);
+
   const isFarmLocked = Boolean(lockedFarm && (userRole === 'OPERADOR' || userRole === 'SOLICITANTE'));
 
   const setLockedFarm = (farm: Farm | null) => {
@@ -1785,6 +2288,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         safeLocalStorageSet(STORAGE_KEYS.FLEET_MONTHLY_UPDATES, JSON.stringify(merged));
         return merged;
       });
+    }
+
+    if (isAuthenticatedRef.current) {
+      Promise.allSettled([
+        ...(payload.checklists || []).map((c) => saveToFirestore('checklists', c.id, c)),
+        ...(payload.workOrders || []).map((w) => saveToFirestore('workOrders', w.id, w)),
+        ...(payload.fleetMonthlyUpdates || []).map((u) => saveToFirestore('fleetMonthlyUpdates', u.id, u))
+      ]).catch(() => {});
     }
 
     api.batchSync({
@@ -2095,11 +2606,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addChecklist = (data: Omit<ChecklistRecord, 'id' | 'code' | 'createdAt'> & { id?: string; code?: string; createdAt?: string }): ChecklistRecord => {
     const nextIndex = checklists.length + 1;
     const code = data.code || `CHK-${String(nextIndex).padStart(3, '0')}`;
+    const resolvedId = data.id || `chk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const existingChecklist = checklists.find(c => c.id === resolvedId);
+    const resolvedCreatedAt =
+      existingChecklist?.createdAt || draftCreatedAtRef.current[resolvedId] || data.createdAt || new Date().toISOString();
     const newRecord: ChecklistRecord = {
       ...data,
-      id: data.id || `chk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: resolvedId,
       code,
-      createdAt: data.createdAt || new Date().toISOString()
+      createdAt: resolvedCreatedAt,
+      isDraft: false
     };
 
     // Update local state immediately for instant feedback
@@ -2123,16 +2639,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'info'
       });
     } else {
+      syncSaveFirestore('checklists', newRecord.id, newRecord);
       // Upload to central server
       api.saveChecklist(newRecord).catch(err => {
-        console.warn('[API] Could not save checklist to server, queued offline:', err);
-        addToOfflineQueue({
-          id: newRecord.id,
-          type: 'checklist',
-          action: 'save',
-          data: newRecord,
-          timestamp: Date.now()
-        });
+        console.warn('[API] Could not save checklist to server:', err);
+        if (!isAuthenticatedRef.current) {
+          addToOfflineQueue({
+            id: newRecord.id,
+            type: 'checklist',
+            action: 'save',
+            data: newRecord,
+            timestamp: Date.now()
+          });
+        }
       });
 
       // Automatically broadcast to the PC in real-time
@@ -2158,19 +2677,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: Date.now()
       });
     } else {
+      await syncDeleteFirestore('checklists', id, true);
       try {
         await api.deleteChecklist(id);
         cloudLiveSync.publish('CHECKLIST_DELETED', { id });
         cloudLiveSync.publish('ITEM_DELETED', { id, type: 'checklist' });
       } catch (err) {
-        console.warn('[API] Could not delete checklist on server, queued offline:', err);
-        addToOfflineQueue({
-          id,
-          type: 'checklist',
-          action: 'delete',
-          data: { id },
-          timestamp: Date.now()
-        });
+        console.warn('[API] Could not delete checklist on server:', err);
+        if (!isAuthenticatedRef.current) {
+          addToOfflineQueue({
+            id,
+            type: 'checklist',
+            action: 'delete',
+            data: { id },
+            timestamp: Date.now()
+          });
+        }
       }
     }
   };
@@ -2222,6 +2744,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (viewChecklistDetail?.id === checklistId) {
         setViewChecklistDetail(updatedRecord);
       }
+      await syncSaveFirestore('checklists', (updatedRecord as ChecklistRecord).id, updatedRecord);
       api.saveChecklist(updatedRecord).catch(() => {});
       cloudLiveSync.publish('CHECKLIST_SAVED', updatedRecord);
 
@@ -2268,6 +2791,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (viewChecklistDetail?.id === checklistId) {
         setViewChecklistDetail(updatedRecord);
       }
+      await syncSaveFirestore('checklists', (updatedRecord as ChecklistRecord).id, updatedRecord);
       api.saveChecklist(updatedRecord).catch(() => {});
       cloudLiveSync.publish('CHECKLIST_SAVED', updatedRecord);
 
@@ -2317,6 +2841,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (viewChecklistDetail?.id === checklistId) {
         setViewChecklistDetail(updatedRecord);
       }
+      await syncSaveFirestore('checklists', (updatedRecord as ChecklistRecord).id, updatedRecord);
       api.saveChecklist(updatedRecord).catch(() => {});
       cloudLiveSync.publish('CHECKLIST_SAVED', updatedRecord);
 
@@ -2332,11 +2857,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const year = new Date().getFullYear();
     const code = data.code || `OS-${year}-${String(nextIndex).padStart(3, '0')}`;
     const nowIso = new Date().toISOString();
+    const resolvedId = data.id || `os_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const existingWo = workOrders.find(w => w.id === resolvedId);
+    const resolvedCreatedAt = existingWo?.createdAt || draftCreatedAtRef.current[resolvedId] || data.createdAt || nowIso;
     const newRecord: WorkOrder = {
       ...data,
-      id: data.id || `os_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: resolvedId,
       code,
-      createdAt: data.createdAt || nowIso,
+      createdAt: resolvedCreatedAt,
       updatedAt: nowIso
     };
 
@@ -2348,11 +2876,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // If linked to checklist
     if (data.checklistSourceId) {
+      let updatedChecklist: ChecklistRecord | null = null;
       setChecklists(prev =>
-        prev.map(c => {
+        prev.map((c): ChecklistRecord => {
           if (c.id === data.checklistSourceId) {
             const currentIds = c.workOrderIds || [];
-            return {
+            const nextChecklist: ChecklistRecord = {
               ...c,
               workOrderIds: [...currentIds, newRecord.id],
               items: c.items.map(item => {
@@ -2362,10 +2891,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 return item;
               })
             };
+            updatedChecklist = nextChecklist;
+            return nextChecklist;
           }
           return c;
         })
       );
+      if (updatedChecklist) {
+        syncSaveFirestore('checklists', (updatedChecklist as ChecklistRecord).id, updatedChecklist);
+        api.saveChecklist(updatedChecklist).catch(() => {});
+      }
     }
 
     // If linked to Service Request, update it to OS_GERADA
@@ -2396,6 +2931,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             timestamp: Date.now()
           });
         } else {
+          syncSaveFirestore('serviceRequests', updatedReq.id, updatedReq);
           api.saveServiceRequest(updatedReq).catch(() => {});
           cloudLiveSync.publish('SERVICE_REQUEST_SAVED', updatedReq);
         }
@@ -2417,16 +2953,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'info'
       });
     } else {
+      syncSaveFirestore('workOrders', newRecord.id, newRecord);
       // Upload to central server
       api.saveWorkOrder(newRecord).catch(err => {
-        console.warn('[API] Could not save work order to server, queued offline:', err);
-        addToOfflineQueue({
-          id: newRecord.id,
-          type: 'work-order',
-          action: 'save',
-          data: newRecord,
-          timestamp: Date.now()
-        });
+        console.warn('[API] Could not save work order to server:', err);
+        if (!isAuthenticatedRef.current) {
+          addToOfflineQueue({
+            id: newRecord.id,
+            type: 'work-order',
+            action: 'save',
+            data: newRecord,
+            timestamp: Date.now()
+          });
+        }
       });
 
       // Automatically broadcast to the PC in real-time
@@ -2471,6 +3010,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           safeLocalStorageSet(STORAGE_KEYS.SERVICE_REQUESTS, JSON.stringify(next));
           return next;
         });
+        await syncSaveFirestore('serviceRequests', updatedReq.id, updatedReq);
         api.saveServiceRequest(updatedReq).catch(() => {});
         cloudLiveSync.publish('SERVICE_REQUEST_SAVED', updatedReq);
       }
@@ -2485,14 +3025,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: Date.now()
       });
     } else {
+      if (updatedRecord) {
+        await syncSaveFirestore('workOrders', (updatedRecord as WorkOrder).id, updatedRecord);
+      }
       try {
         await api.updateWorkOrder(id, updates);
         if (updatedRecord) {
           cloudLiveSync.publish('WORK_ORDER_SAVED', updatedRecord);
         }
       } catch (err) {
-        console.warn('[API] Could not update work order on server, queued offline:', err);
-        if (updatedRecord) {
+        console.warn('[API] Could not update work order on server:', err);
+        if (updatedRecord && !isAuthenticatedRef.current) {
           addToOfflineQueue({
             id,
             type: 'work-order',
@@ -2521,25 +3064,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: Date.now()
       });
     } else {
+      await syncDeleteFirestore('workOrders', id, true);
       try {
         await api.deleteWorkOrder(id);
         cloudLiveSync.publish('WORK_ORDER_DELETED', { id });
         cloudLiveSync.publish('ITEM_DELETED', { id, type: 'work-order' });
       } catch (err) {
-        console.warn('[API] Could not delete work order on server, queued offline:', err);
-        addToOfflineQueue({
-          id,
-          type: 'work-order',
-          action: 'delete',
-          data: { id },
-          timestamp: Date.now()
-        });
+        console.warn('[API] Could not delete work order on server:', err);
+        if (!isAuthenticatedRef.current) {
+          addToOfflineQueue({
+            id,
+            type: 'work-order',
+            action: 'delete',
+            data: { id },
+            timestamp: Date.now()
+          });
+        }
       }
     }
   };
 
-  // Auto-save drafts to central server without spamming external live sync
+  // Auto-save drafts to central server & Firestore without spamming external live sync
   const autoSaveDraft = async (type: 'checklist' | 'work-order' | 'fleet-update', data: any) => {
+    if (data?.id && !draftCreatedAtRef.current[data.id]) {
+      draftCreatedAtRef.current[data.id] = data.createdAt || new Date().toISOString();
+    }
+    if (isAuthenticatedRef.current && (typeof navigator === 'undefined' || navigator.onLine) && data?.id) {
+      const col: FirestoreCollectionName =
+        type === 'checklist' ? 'checklists' : type === 'fleet-update' ? 'fleetMonthlyUpdates' : 'workOrders';
+      syncSaveFirestore(col, data.id, {
+        ...data,
+        createdAt: draftCreatedAtRef.current[data.id]
+      });
+    }
     try {
       await api.autoSaveDraft(type, data);
     } catch (err) {
@@ -2597,11 +3154,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addFleetMonthlyUpdate = useCallback((data: Omit<VehicleMonthlyUpdate, 'id' | 'code' | 'createdAt'> & { id?: string; code?: string; createdAt?: string }): VehicleMonthlyUpdate => {
     const nextIndex = fleetMonthlyUpdates.length + 1;
     const code = data.code || `AMV-2026-${String(nextIndex).padStart(3, '0')}`;
+    const resolvedId = data.id || `amv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const existingUpdate = fleetMonthlyUpdates.find(u => u.id === resolvedId);
+    const resolvedCreatedAt = existingUpdate?.createdAt || draftCreatedAtRef.current[resolvedId] || data.createdAt || new Date().toISOString();
     const newRecord: VehicleMonthlyUpdate = {
       ...data,
-      id: data.id || `amv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: resolvedId,
       code,
-      createdAt: data.createdAt || new Date().toISOString()
+      createdAt: resolvedCreatedAt,
+      updatedAt: new Date().toISOString()
     };
 
     setFleetMonthlyUpdates(prev => [newRecord, ...prev.filter(u => u.id !== newRecord.id)]);
@@ -2622,20 +3183,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'info'
       });
     } else {
+      syncSaveFirestore('fleetMonthlyUpdates', newRecord.id, newRecord);
       api.saveFleetMonthlyUpdate(newRecord).catch(err => {
-        console.warn('[API] Could not save fleet update to server, queued offline:', err);
-        addToOfflineQueue({
-          id: newRecord.id,
-          type: 'fleet-update',
-          action: 'save',
-          data: newRecord,
-          timestamp: Date.now()
-        });
+        console.warn('[API] Could not save fleet update to server:', err);
+        if (!isAuthenticatedRef.current) {
+          addToOfflineQueue({
+            id: newRecord.id,
+            type: 'fleet-update',
+            action: 'save',
+            data: newRecord,
+            timestamp: Date.now()
+          });
+        }
       });
     }
 
     return newRecord;
-  }, [fleetMonthlyUpdates, addToOfflineQueue]);
+  }, [fleetMonthlyUpdates, addToOfflineQueue, syncSaveFirestore]);
 
   const deleteFleetMonthlyUpdate = useCallback(async (id: string) => {
     setFleetMonthlyUpdates(prev => prev.filter(u => u.id !== id));
@@ -2655,20 +3219,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: Date.now()
       });
     } else {
+      await syncDeleteFirestore('fleetMonthlyUpdates', id, true);
       try {
         await api.deleteFleetMonthlyUpdate(id);
       } catch (err) {
-        console.warn('[API] Could not delete fleet update on server, queued offline:', err);
-        addToOfflineQueue({
-          id,
-          type: 'fleet-update',
-          action: 'delete',
-          data: { id },
-          timestamp: Date.now()
-        });
+        console.warn('[API] Could not delete fleet update on server:', err);
+        if (!isAuthenticatedRef.current) {
+          addToOfflineQueue({
+            id,
+            type: 'fleet-update',
+            action: 'delete',
+            data: { id },
+            timestamp: Date.now()
+          });
+        }
       }
     }
-  }, [viewFleetUpdateDetail, recordDeletedId, addToOfflineQueue]);
+  }, [viewFleetUpdateDetail, recordDeletedId, addToOfflineQueue, syncDeleteFirestore]);
 
   // Reconhecimento / Aceite Administrativo de Sinistro de Frota (Exclusivo Admin)
   const acknowledgeFleetSinistro = useCallback(async (
@@ -2703,6 +3270,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (viewFleetUpdateDetail?.id === updateId) {
         setViewFleetUpdateDetail(updatedRecord);
       }
+      await syncSaveFirestore('fleetMonthlyUpdates', (updatedRecord as VehicleMonthlyUpdate).id, updatedRecord);
       try {
         await api.saveFleetMonthlyUpdate(updatedRecord);
       } catch {}
@@ -2714,7 +3282,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'success'
       });
     }
-  }, [viewFleetUpdateDetail]);
+  }, [viewFleetUpdateDetail, syncSaveFirestore]);
 
   const unacknowledgeFleetSinistro = useCallback(async (updateId: string) => {
     const isoNow = new Date().toISOString();
@@ -2744,6 +3312,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (viewFleetUpdateDetail?.id === updateId) {
         setViewFleetUpdateDetail(updatedRecord);
       }
+      await syncSaveFirestore('fleetMonthlyUpdates', (updatedRecord as VehicleMonthlyUpdate).id, updatedRecord);
       try {
         await api.saveFleetMonthlyUpdate(updatedRecord);
       } catch {}
@@ -2755,7 +3324,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'info'
       });
     }
-  }, [viewFleetUpdateDetail]);
+  }, [viewFleetUpdateDetail, syncSaveFirestore]);
 
   // ==================== ABASTECIMENTO DE VEÍCULOS & PARÂMETROS DE CONSUMO ====================
 
@@ -2799,21 +3368,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'info'
       });
     } else {
+      syncSaveFirestore('fuelLogs', record.id, record);
       api.saveFuelLog(record).catch(err => {
-        console.warn('[API] Could not save fuel log to server, queued offline:', err);
-        addToOfflineQueue({
-          id: record.id,
-          type: 'fuel-log',
-          action: 'save',
-          data: record,
-          timestamp: Date.now()
-        });
+        console.warn('[API] Could not save fuel log to server:', err);
+        if (!isAuthenticatedRef.current) {
+          addToOfflineQueue({
+            id: record.id,
+            type: 'fuel-log',
+            action: 'save',
+            data: record,
+            timestamp: Date.now()
+          });
+        }
       });
       cloudLiveSync.publish('FUEL_LOG_SAVED', record);
     }
 
     return record;
-  }, [fuelLogs, addToOfflineQueue]);
+  }, [fuelLogs, addToOfflineQueue, syncSaveFirestore]);
 
   const deleteFuelLog = useCallback(async (id: string) => {
     setFuelLogs(prev => {
@@ -2832,22 +3404,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: Date.now()
       });
     } else {
+      await syncDeleteFirestore('fuelLogs', id, true);
       try {
         await api.deleteFuelLog(id);
         cloudLiveSync.publish('FUEL_LOG_DELETED', { id });
         cloudLiveSync.publish('ITEM_DELETED', { id, type: 'fuel-log' });
       } catch (err) {
-        console.warn('[API] Could not delete fuel log on server, queued offline:', err);
-        addToOfflineQueue({
-          id,
-          type: 'fuel-log',
-          action: 'delete',
-          data: { id },
-          timestamp: Date.now()
-        });
+        console.warn('[API] Could not delete fuel log on server:', err);
+        if (!isAuthenticatedRef.current) {
+          addToOfflineQueue({
+            id,
+            type: 'fuel-log',
+            action: 'delete',
+            data: { id },
+            timestamp: Date.now()
+          });
+        }
       }
     }
-  }, [recordDeletedId, addToOfflineQueue]);
+  }, [recordDeletedId, addToOfflineQueue, syncDeleteFirestore]);
 
   const saveFuelConsumptionRule = useCallback((
     ruleData: Omit<FuelConsumptionRule, 'id'> & { id?: string }
@@ -2885,20 +3460,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: Date.now()
       });
     } else {
+      syncSaveFirestore('fuelConsumptionRules', record.id, record);
       api.saveFuelConsumptionRule(record).catch(() => {
-        addToOfflineQueue({
-          id: record.id,
-          type: 'fuel-rule',
-          action: 'save',
-          data: record,
-          timestamp: Date.now()
-        });
+        if (!isAuthenticatedRef.current) {
+          addToOfflineQueue({
+            id: record.id,
+            type: 'fuel-rule',
+            action: 'save',
+            data: record,
+            timestamp: Date.now()
+          });
+        }
       });
       cloudLiveSync.publish('FUEL_RULE_SAVED', record);
     }
 
     return record;
-  }, [fuelConsumptionRules, addToOfflineQueue]);
+  }, [fuelConsumptionRules, addToOfflineQueue, syncSaveFirestore]);
 
   const saveFuelConsumptionRulesBatch = useCallback((payload: {
     rules: Array<Omit<FuelConsumptionRule, 'id'> & { id?: string }>;
@@ -2958,35 +3536,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       });
     } else {
+      preparedRules.forEach(record => syncSaveFirestore('fuelConsumptionRules', record.id, record));
+      deleteSet.forEach(id => syncDeleteFirestore('fuelConsumptionRules', id, true));
       api.saveFuelConsumptionRulesBatch({
         rules: preparedRules,
         deleteRuleIds: Array.from(deleteSet)
       }).catch(() => {
-        preparedRules.forEach(record => {
-          addToOfflineQueue({
-            id: record.id,
-            type: 'fuel-rule',
-            action: 'save',
-            data: record,
-            timestamp: Date.now()
+        if (!isAuthenticatedRef.current) {
+          preparedRules.forEach(record => {
+            addToOfflineQueue({
+              id: record.id,
+              type: 'fuel-rule',
+              action: 'save',
+              data: record,
+              timestamp: Date.now()
+            });
           });
-        });
-        deleteSet.forEach(id => {
-          addToOfflineQueue({
-            id,
-            type: 'fuel-rule',
-            action: 'delete',
-            data: { id },
-            timestamp: Date.now()
+          deleteSet.forEach(id => {
+            addToOfflineQueue({
+              id,
+              type: 'fuel-rule',
+              action: 'delete',
+              data: { id },
+              timestamp: Date.now()
+            });
           });
-        });
+        }
       });
       preparedRules.forEach(record => cloudLiveSync.publish('FUEL_RULE_SAVED', record));
       deleteSet.forEach(id => cloudLiveSync.publish('FUEL_RULE_DELETED', { id }));
     }
 
     return preparedRules;
-  }, [fuelConsumptionRules, addToOfflineQueue, recordDeletedId]);
+  }, [fuelConsumptionRules, addToOfflineQueue, recordDeletedId, syncSaveFirestore, syncDeleteFirestore]);
 
   const deleteFuelConsumptionRule = useCallback(async (id: string) => {
     if (id === 'fcr_default') return;
@@ -3006,10 +3588,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: Date.now()
       });
     } else {
+      await syncDeleteFirestore('fuelConsumptionRules', id, true);
       api.deleteFuelConsumptionRule(id).catch(() => {});
       cloudLiveSync.publish('FUEL_RULE_DELETED', { id });
     }
-  }, [recordDeletedId, addToOfflineQueue]);
+  }, [recordDeletedId, addToOfflineQueue, syncDeleteFirestore]);
 
   // NR-13 & Metrologia (Laudos e Calibrações) actions
   const saveNR13Report = useCallback(async (rep: NR13InspectionReport) => {
@@ -3024,12 +3607,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       safeLocalStorageSet(STORAGE_KEYS.NR13_REPORTS, JSON.stringify(next));
       return next;
     });
+    await syncSaveFirestore('nr13Reports', rep.id, rep);
     try {
       await api.saveNR13Report(rep);
     } catch (e) {
       console.warn('[API] Could not save NR13 report to server, saved locally:', e);
     }
-  }, []);
+  }, [syncSaveFirestore]);
 
   const deleteNR13Report = useCallback(async (id: string) => {
     setNr13Reports(prev => {
@@ -3038,12 +3622,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return next;
     });
     recordDeletedId(id);
+    await syncDeleteFirestore('nr13Reports', id, true);
     try {
       await api.deleteNR13Report(id);
     } catch (e) {
       console.warn('[API] Could not delete NR13 report from server:', e);
     }
-  }, [recordDeletedId]);
+  }, [recordDeletedId, syncDeleteFirestore]);
 
   const saveNR13Vessel = useCallback(async (vessel: NR13VesselMaster) => {
     const normalized: NR13VesselMaster = {
@@ -3058,12 +3643,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       safeLocalStorageSet(STORAGE_KEYS.NR13_VESSELS, JSON.stringify(next));
       return next;
     });
+    await syncSaveFirestore('nr13Vessels', normalized.id, normalized);
     try {
       await api.saveNR13Vessel(normalized);
     } catch (e) {
       console.warn('[API] Could not save NR13 vessel to server, saved locally:', e);
     }
-  }, []);
+  }, [syncSaveFirestore]);
 
   const deleteNR13Vessel = useCallback(async (id: string) => {
     setNr13Vessels(prev => {
@@ -3072,12 +3658,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return next;
     });
     recordDeletedId(id);
+    await syncDeleteFirestore('nr13Vessels', id, true);
     try {
       await api.deleteNR13Vessel(id);
     } catch (e) {
       console.warn('[API] Could not delete NR13 vessel from server:', e);
     }
-  }, [recordDeletedId]);
+  }, [recordDeletedId, syncDeleteFirestore]);
 
   const saveValveCalibration = useCallback(async (record: ValveCalibrationRecord) => {
     setValveCalibrations(prev => {
@@ -3091,12 +3678,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       safeLocalStorageSet(STORAGE_KEYS.VALVE_CALIBRATIONS, JSON.stringify(next));
       return next;
     });
+    await syncSaveFirestore('valveCalibrations', record.id, record);
     try {
       await api.saveValveCalibration(record);
     } catch (e) {
       console.warn('[API] Could not save valve calibration to server:', e);
     }
-  }, []);
+  }, [syncSaveFirestore]);
 
   const deleteValveCalibration = useCallback(async (id: string) => {
     setValveCalibrations(prev => {
@@ -3105,12 +3693,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return next;
     });
     recordDeletedId(id);
+    await syncDeleteFirestore('valveCalibrations', id, true);
     try {
       await api.deleteValveCalibration(id);
     } catch (e) {
       console.warn('[API] Could not delete valve calibration from server:', e);
     }
-  }, [recordDeletedId]);
+  }, [recordDeletedId, syncDeleteFirestore]);
 
   const saveGaugeCalibration = useCallback(async (record: GaugeCalibrationRecord) => {
     setGaugeCalibrations(prev => {
@@ -3124,12 +3713,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       safeLocalStorageSet(STORAGE_KEYS.GAUGE_CALIBRATIONS, JSON.stringify(next));
       return next;
     });
+    await syncSaveFirestore('gaugeCalibrations', record.id, record);
     try {
       await api.saveGaugeCalibration(record);
     } catch (e) {
       console.warn('[API] Could not save gauge calibration to server:', e);
     }
-  }, []);
+  }, [syncSaveFirestore]);
 
   const deleteGaugeCalibration = useCallback(async (id: string) => {
     setGaugeCalibrations(prev => {
@@ -3138,12 +3728,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return next;
     });
     recordDeletedId(id);
+    await syncDeleteFirestore('gaugeCalibrations', id, true);
     try {
       await api.deleteGaugeCalibration(id);
     } catch (e) {
       console.warn('[API] Could not delete gauge calibration from server:', e);
     }
-  }, [recordDeletedId]);
+  }, [recordDeletedId, syncDeleteFirestore]);
 
   const saveUltrassomEquipment = useCallback(async (record: UltrassomEquipmentRecord) => {
     setUltrassomEquipments(prev => {
@@ -3157,12 +3748,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       safeLocalStorageSet(STORAGE_KEYS.ULTRASSOM_EQUIPMENTS, JSON.stringify(next));
       return next;
     });
+    await syncSaveFirestore('ultrassomEquipments', record.id, record);
     try {
       await api.saveUltrassomEquipment(record);
     } catch (e) {
       console.warn('[API] Could not save ultrassom equipment to server:', e);
     }
-  }, []);
+  }, [syncSaveFirestore]);
 
   const deleteUltrassomEquipment = useCallback(async (id: string) => {
     setUltrassomEquipments(prev => {
@@ -3171,12 +3763,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return next;
     });
     recordDeletedId(id);
+    await syncDeleteFirestore('ultrassomEquipments', id, true);
     try {
       await api.deleteUltrassomEquipment(id);
     } catch (e) {
       console.warn('[API] Could not delete ultrassom equipment from server:', e);
     }
-  }, [recordDeletedId]);
+  }, [recordDeletedId, syncDeleteFirestore]);
 
   // ==================== SOLICITAÇÕES DE SERVIÇO & LIBERAÇÃO EXCLUSIVA ====================
 
@@ -3235,21 +3828,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         }
       } catch (err) {
-        console.warn('[API] Could not save service request to server, queued offline:', err);
-        addToOfflineQueue({
-          id: newRecord.id,
-          type: 'service-request',
-          action: 'save',
-          data: newRecord,
-          timestamp: Date.now()
-        });
+        console.warn('[API] Could not save service request to server:', err);
+        if (!isAuthenticatedRef.current) {
+          addToOfflineQueue({
+            id: newRecord.id,
+            type: 'service-request',
+            action: 'save',
+            data: newRecord,
+            timestamp: Date.now()
+          });
+        }
       }
+      await syncSaveFirestore('serviceRequests', persistedRecord.id, persistedRecord);
       cloudLiveSync.publish('SERVICE_REQUEST_SAVED', persistedRecord);
       return persistedRecord;
     }
 
     return newRecord;
-  }, [serviceRequests.length, addToOfflineQueue]);
+  }, [serviceRequests.length, addToOfflineQueue, syncSaveFirestore]);
 
   const updateServiceRequest = useCallback(async (id: string, updates: Partial<ServiceRequest>) => {
     const target = serviceRequestsRef.current.find(sr => sr.id === id);
@@ -3276,10 +3872,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: Date.now()
       });
     } else {
+      await syncSaveFirestore('serviceRequests', updatedRecord.id, updatedRecord);
       api.saveServiceRequest(updatedRecord).catch(() => {});
       cloudLiveSync.publish('SERVICE_REQUEST_SAVED', updatedRecord);
     }
-  }, [addToOfflineQueue]);
+  }, [addToOfflineQueue, syncSaveFirestore]);
 
   const deleteServiceRequest = useCallback(async (id: string) => {
     setServiceRequests(prev => {
@@ -3301,10 +3898,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: Date.now()
       });
     } else {
+      await syncDeleteFirestore('serviceRequests', id, true);
       api.deleteServiceRequest(id).catch(() => {});
       cloudLiveSync.publish('SERVICE_REQUEST_DELETED', { id });
     }
-  }, [viewServiceRequestDetail, recordDeletedId, addToOfflineQueue]);
+  }, [viewServiceRequestDetail, recordDeletedId, addToOfflineQueue, syncDeleteFirestore]);
 
   const generateWorkOrderFromServiceRequest = useCallback((sr: ServiceRequest) => {
     const isValidated =
@@ -3391,13 +3989,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           safeLocalStorageSet(STORAGE_KEYS.OPERATOR_RELEASES, JSON.stringify(next));
           return next;
         });
+        await syncSaveFirestore('operatorServiceReleases', res.release.id, res.release);
         cloudLiveSync.publish('OPERATOR_RELEASE_SAVED', res.release);
         return res.release;
       }
     } catch (e) {
       console.warn('[API] Erro ao salvar liberação no servidor:', e);
     }
-    // Fallback local
+    // Fallback local + Firestore
     const fallback: OperatorServiceRelease = {
       id: data.id || `rel_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
       token: data.token || `ss_key_${Math.random().toString(36).substring(2, 8)}${Date.now().toString(36).slice(-4)}`,
@@ -3412,9 +4011,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       safeLocalStorageSet(STORAGE_KEYS.OPERATOR_RELEASES, JSON.stringify(next));
       return next;
     });
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      addToOfflineQueue({
+        id: fallback.id,
+        type: 'operator-release',
+        action: 'save',
+        data: fallback,
+        timestamp: Date.now()
+      });
+    } else {
+      await syncSaveFirestore('operatorServiceReleases', fallback.id, fallback);
+    }
     cloudLiveSync.publish('OPERATOR_RELEASE_SAVED', fallback);
     return fallback;
-  }, []);
+  }, [syncSaveFirestore, addToOfflineQueue]);
 
   const toggleOperatorRelease = useCallback(async (id: string) => {
     const target = operatorReleasesRef.current.find(o => o.id === id);
@@ -3425,9 +4035,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       safeLocalStorageSet(STORAGE_KEYS.OPERATOR_RELEASES, JSON.stringify(next));
       return next;
     });
+    await syncSaveFirestore('operatorServiceReleases', updated.id, updated);
     api.saveOperatorRelease(updated).catch(() => {});
     cloudLiveSync.publish('OPERATOR_RELEASE_SAVED', updated);
-  }, []);
+  }, [syncSaveFirestore]);
 
   const deleteOperatorRelease = useCallback(async (id: string) => {
     setOperatorServiceReleases(prev => {
@@ -3436,9 +4047,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return next;
     });
     recordDeletedId(id);
+    await syncDeleteFirestore('operatorServiceReleases', id, true);
     api.deleteOperatorRelease(id).catch(() => {});
     cloudLiveSync.publish('OPERATOR_RELEASE_DELETED', { id });
-  }, [recordDeletedId]);
+  }, [recordDeletedId, syncDeleteFirestore]);
 
   // Reset to default sample data
   const resetToDefaults = async () => {
@@ -3461,6 +4073,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Clear newly created test records
   const clearTestRecords = async () => {
     try {
+      const prevIds = new Set([...checklists.map(c => c.id), ...workOrders.map(w => w.id)]);
       const res = await api.clearTests();
       if (res.checklists && res.workOrders) {
         setChecklists(res.checklists);
@@ -3471,6 +4084,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deletedIdsRef.current = res.deletedIds;
         safeLocalStorageSet(STORAGE_KEYS.DELETED_IDS, JSON.stringify(res.deletedIds));
         cloudLiveSync.publish('CLEAR_TESTS', { deletedIds: res.deletedIds });
+
+        const removedIds = res.deletedIds.filter((id: string) => prevIds.has(id));
+        if (isAuthenticatedRef.current && removedIds.length > 0) {
+          Promise.allSettled(
+            removedIds.map((id: string) => {
+              const isChk = checklists.some(c => c.id === id);
+              return deleteFromFirestore(isChk ? 'checklists' : 'workOrders', id, true);
+            })
+          ).catch(() => {});
+        }
       }
     } catch (err) {
       console.warn('Error clearing tests:', err);
@@ -3479,6 +4102,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Restore standard template individually
   const restoreItemIndividually = async (type: 'checklist' | 'work-order', id: string) => {
+    recentlyDeletedLocalRef.current.delete(id);
+    if (isAuthenticatedRef.current) {
+      await removeTombstoneFromFirestore(id).catch(() => {});
+    }
     try {
       // Remove from tombstones
       setDeletedIds(prev => {
@@ -3492,6 +4119,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (res.checklists && res.workOrders) {
         setChecklists(res.checklists);
         setWorkOrders(res.workOrders);
+        if (type === 'checklist') {
+          const restored = res.checklists.find((c: ChecklistRecord) => c.id === id);
+          if (restored) await syncSaveFirestore('checklists', restored.id, restored);
+        } else {
+          const restored = res.workOrders.find((w: WorkOrder) => w.id === id);
+          if (restored) await syncSaveFirestore('workOrders', restored.id, restored);
+        }
       }
     } catch (err) {
       console.warn('Erro ao restaurar individualmente:', err);
@@ -3507,11 +4141,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const item = INITIAL_CHECKLISTS.find(c => c.id === id);
         if (item) {
           setChecklists(prev => [item, ...prev.filter(c => c.id !== id)]);
+          await syncSaveFirestore('checklists', item.id, item);
         }
       } else {
         const item = INITIAL_WORK_ORDERS.find(w => w.id === id);
         if (item) {
           setWorkOrders(prev => [item, ...prev.filter(w => w.id !== id)]);
+          await syncSaveFirestore('workOrders', item.id, item);
         }
       }
     }
@@ -3612,6 +4248,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setDeletedIds(res.deletedIds);
         deletedIdsRef.current = res.deletedIds;
         safeLocalStorageSet(STORAGE_KEYS.DELETED_IDS, JSON.stringify(res.deletedIds));
+      }
+
+      if (isAuthenticatedRef.current) {
+        Promise.allSettled([
+          ...(Array.isArray(parsed.vehicles) ? parsed.vehicles.map((v: Vehicle) => syncSaveFirestore('vehicles', v.id, v)) : []),
+          ...(Array.isArray(parsed.drones) ? parsed.drones.map((d: DroneAsset) => syncSaveFirestore('drones', d.id, d)) : []),
+          ...(Array.isArray(parsed.fleetMonthlyUpdates) ? parsed.fleetMonthlyUpdates.map((u: VehicleMonthlyUpdate) => syncSaveFirestore('fleetMonthlyUpdates', u.id, u)) : []),
+          ...(Array.isArray(parsed.fuelLogs) ? parsed.fuelLogs.map((f: FuelLogRecord) => syncSaveFirestore('fuelLogs', f.id, f)) : []),
+          ...(Array.isArray(parsed.fuelConsumptionRules) ? parsed.fuelConsumptionRules.map((r: FuelConsumptionRule) => syncSaveFirestore('fuelConsumptionRules', r.id, r)) : []),
+          ...(Array.isArray(parsed.nr13Vessels) ? parsed.nr13Vessels.map((v: NR13VesselMaster) => syncSaveFirestore('nr13Vessels', v.id, v)) : []),
+          ...(Array.isArray(parsed.nr13Reports) ? parsed.nr13Reports.map((r: NR13InspectionReport) => syncSaveFirestore('nr13Reports', r.id, r)) : []),
+          ...(Array.isArray(res.checklists) ? res.checklists.map((c: ChecklistRecord) => syncSaveFirestore('checklists', c.id, c)) : []),
+          ...(Array.isArray(res.workOrders) ? res.workOrders.map((w: WorkOrder) => syncSaveFirestore('workOrders', w.id, w)) : [])
+        ]).catch(() => {});
       }
 
       setSyncToast({

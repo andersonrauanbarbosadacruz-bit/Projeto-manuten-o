@@ -1,0 +1,763 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==================== GLOBAL HARDENED PRIMITIVES ====================
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email == 'andersonrauanbarbosadacruz@gmail.com' && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isValidFarm(farm) {
+      return farm in ['Vale das Uvas', 'Brasil Uvas', 'Labrunier 1', 'Labrunier 2', 'Matriz', 'Bravis'];
+    }
+
+    // ==================== ENTITY VALIDATION BLUEPRINTS ====================
+
+    function isValidChecklist(data) {
+      return data.keys().hasAll([
+          'id', 'code', 'type', 'farm', 'location', 'date', 'time', 'inspector',
+          'items', 'statusSummary', 'createdAt', 'serverUpdatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'code', 'type', 'farm', 'location', 'date', 'time', 'inspector',
+          'shift', 'droneModel', 'vehiclePlate', 'vehicleModel', 'initialKm', 'finalKm',
+          'vehicleVisual', 'signatureUrl', 'items', 'generalNotes', 'statusSummary',
+          'workOrderIds', 'createdAt', 'updatedAt', 'isDraft', 'serverUpdatedAt'
+        ])
+        && isValidId(data.id)
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 64
+        && data.type in ['SALA_DE_MAQUINAS', 'GERADOR', 'IRRIGACAO', 'DRONE', 'VEICULO']
+        && isValidFarm(data.farm)
+        && data.location is string && data.location.size() <= 200
+        && data.date is string && data.date.size() <= 32
+        && data.time is string && data.time.size() <= 16
+        && data.inspector is string && data.inspector.size() >= 1 && data.inspector.size() <= 120
+        && (!('shift' in data) || (data.shift is string && data.shift.size() <= 40))
+        && (!('droneModel' in data) || (data.droneModel is string && data.droneModel.size() <= 120))
+        && (!('vehiclePlate' in data) || (data.vehiclePlate is string && data.vehiclePlate.size() <= 32))
+        && (!('vehicleModel' in data) || (data.vehicleModel is string && data.vehicleModel.size() <= 120))
+        && (!('initialKm' in data) || data.initialKm is number || (data.initialKm is string && data.initialKm.size() <= 40))
+        && (!('finalKm' in data) || data.finalKm is number || (data.finalKm is string && data.finalKm.size() <= 40))
+        && (!('vehicleVisual' in data) || data.vehicleVisual is map)
+        && (!('signatureUrl' in data) || (data.signatureUrl is string && data.signatureUrl.size() <= 350000))
+        && data.items is list && data.items.size() <= 120 && (data.items.size() == 0 || data.items[0] is map)
+        && (!('generalNotes' in data) || (data.generalNotes is string && data.generalNotes.size() <= 4000))
+        && data.statusSummary in ['CONFORME', 'COM_PENDENCIAS', 'CRITICO', 'EM_ANDAMENTO']
+        && (!('workOrderIds' in data) || (data.workOrderIds is list && data.workOrderIds.size() <= 100 && (data.workOrderIds.size() == 0 || data.workOrderIds[0] is string)))
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && (!('isDraft' in data) || data.isDraft is bool)
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidWorkOrder(data) {
+      return data.keys().hasAll([
+          'id', 'code', 'farm', 'equipment', 'maintenanceType', 'date', 'time',
+          'location', 'responsible', 'thirdParty', 'isThirdParty', 'problemDescription',
+          'materials', 'photosBefore', 'photosAfter', 'status', 'priority',
+          'createdAt', 'updatedAt', 'serverUpdatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'code', 'farm', 'equipment', 'maintenanceType', 'date', 'time',
+          'location', 'responsible', 'thirdParty', 'isThirdParty', 'problemDescription',
+          'materials', 'photosBefore', 'photosAfter', 'status', 'priority',
+          'solutionDescription', 'completionDate', 'completionTime', 'checklistSourceId',
+          'checklistItemDescription', 'serviceRequestId', 'serviceRequestCode',
+          'requesterName', 'createdAt', 'updatedAt', 'serverUpdatedAt'
+        ])
+        && isValidId(data.id)
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 64
+        && isValidFarm(data.farm)
+        && data.equipment is string && data.equipment.size() >= 1 && data.equipment.size() <= 200
+        && data.maintenanceType in ['PREVENTIVA', 'CORRETIVA']
+        && data.date is string && data.date.size() <= 32
+        && data.time is string && data.time.size() <= 16
+        && data.location is string && data.location.size() <= 200
+        && data.responsible is string && data.responsible.size() <= 120
+        && data.thirdParty is string && data.thirdParty.size() <= 160
+        && data.isThirdParty is bool
+        && data.problemDescription is string && data.problemDescription.size() <= 4000
+        && data.materials is list && data.materials.size() <= 100 && (data.materials.size() == 0 || data.materials[0] is map)
+        && data.photosBefore is list && data.photosBefore.size() <= 20 && (data.photosBefore.size() == 0 || data.photosBefore[0] is map)
+        && data.photosAfter is list && data.photosAfter.size() <= 20 && (data.photosAfter.size() == 0 || data.photosAfter[0] is map)
+        && data.status in ['ABERTA', 'EM_ANDAMENTO', 'CONCLUIDA', 'CANCELADA', 'RASCUNHO']
+        && data.priority in ['BAIXA', 'MEDIA', 'ALTA', 'URGENTE']
+        && (!('solutionDescription' in data) || (data.solutionDescription is string && data.solutionDescription.size() <= 4000))
+        && (!('completionDate' in data) || (data.completionDate is string && data.completionDate.size() <= 32))
+        && (!('completionTime' in data) || (data.completionTime is string && data.completionTime.size() <= 16))
+        && (!('checklistSourceId' in data) || (data.checklistSourceId is string && data.checklistSourceId.size() <= 128))
+        && (!('checklistItemDescription' in data) || (data.checklistItemDescription is string && data.checklistItemDescription.size() <= 400))
+        && (!('serviceRequestId' in data) || (data.serviceRequestId is string && data.serviceRequestId.size() <= 128))
+        && (!('serviceRequestCode' in data) || (data.serviceRequestCode is string && data.serviceRequestCode.size() <= 64))
+        && (!('requesterName' in data) || (data.requesterName is string && data.requesterName.size() <= 120))
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() >= 1 && data.updatedAt.size() <= 64
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidFleetUpdate(data) {
+      return data.keys().hasAll([
+          'id', 'code', 'farm', 'mileage', 'driver', 'date', 'time', 'plate',
+          'preventiveMaintenanceLast30Days', 'hasIncidentLast30Days',
+          'visualInspection', 'createdAt', 'serverUpdatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'code', 'farm', 'mileage', 'driver', 'date', 'time', 'plate',
+          'vehicleModel', 'preventiveMaintenanceLast30Days', 'preventiveMaintenanceNotes',
+          'hasIncidentLast30Days', 'incidentNotes', 'incidentPhotos', 'visualInspection',
+          'notes', 'createdAt', 'updatedAt', 'adminAcknowledged', 'acknowledgedAt',
+          'acknowledgedBy', 'acknowledgementJustification', 'serverUpdatedAt'
+        ])
+        && isValidId(data.id)
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 64
+        && isValidFarm(data.farm)
+        && (data.mileage is number || (data.mileage is string && data.mileage.size() <= 40))
+        && data.driver is string && data.driver.size() >= 1 && data.driver.size() <= 120
+        && data.date is string && data.date.size() <= 32
+        && data.time is string && data.time.size() <= 16
+        && data.plate is string && data.plate.size() >= 1 && data.plate.size() <= 32
+        && (!('vehicleModel' in data) || (data.vehicleModel is string && data.vehicleModel.size() <= 120))
+        && data.preventiveMaintenanceLast30Days is bool
+        && (!('preventiveMaintenanceNotes' in data) || (data.preventiveMaintenanceNotes is string && data.preventiveMaintenanceNotes.size() <= 2000))
+        && data.hasIncidentLast30Days is bool
+        && (!('incidentNotes' in data) || (data.incidentNotes is string && data.incidentNotes.size() <= 2000))
+        && (!('incidentPhotos' in data) || (data.incidentPhotos is list && data.incidentPhotos.size() <= 20 && (data.incidentPhotos.size() == 0 || data.incidentPhotos[0] is string)))
+        && data.visualInspection is map
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000))
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && (!('adminAcknowledged' in data) || data.adminAcknowledged is bool)
+        && (!('acknowledgedAt' in data) || (data.acknowledgedAt is string && data.acknowledgedAt.size() <= 64))
+        && (!('acknowledgedBy' in data) || (data.acknowledgedBy is string && data.acknowledgedBy.size() <= 120))
+        && (!('acknowledgementJustification' in data) || (data.acknowledgementJustification is string && data.acknowledgementJustification.size() <= 1000))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidFuelLog(data) {
+      return data.keys().hasAll([
+          'id', 'code', 'date', 'driver', 'plate', 'fuelType', 'liters', 'km',
+          'location', 'createdAt', 'serverUpdatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'code', 'date', 'time', 'driver', 'plate', 'vehicleModel',
+          'fuelType', 'liters', 'km', 'location', 'notes', 'createdAt', 'updatedAt', 'serverUpdatedAt'
+        ])
+        && isValidId(data.id)
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 64
+        && data.date is string && data.date.size() >= 1 && data.date.size() <= 32
+        && (!('time' in data) || (data.time is string && data.time.size() <= 16))
+        && data.driver is string && data.driver.size() >= 1 && data.driver.size() <= 120
+        && data.plate is string && data.plate.size() >= 1 && data.plate.size() <= 32
+        && (!('vehicleModel' in data) || (data.vehicleModel is string && data.vehicleModel.size() <= 120))
+        && data.fuelType in ['Gasolina', 'Diesel Comum', 'Diesel S10']
+        && data.liters is number && data.liters > 0 && data.liters <= 50000
+        && data.km is number && data.km >= 0 && data.km <= 10000000
+        && data.location in ['Vale das Uvas', 'Brasil Uvas', 'Labrunier 1', 'Labrunier 2', 'Matriz', 'Bravis', 'Posto L3', 'Posto Raul Lins']
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidFuelRule(data) {
+      return data.keys().hasAll(['id', 'plate', 'minConsumption', 'avgConsumption', 'maxConsumption', 'serverUpdatedAt'])
+        && data.keys().hasOnly(['id', 'plate', 'minConsumption', 'avgConsumption', 'maxConsumption', 'updatedAt', 'serverUpdatedAt'])
+        && isValidId(data.id)
+        && data.plate is string && data.plate.size() >= 1 && data.plate.size() <= 32
+        && data.minConsumption is number && data.minConsumption > 0 && data.minConsumption <= 100
+        && data.avgConsumption is number && data.avgConsumption >= data.minConsumption && data.avgConsumption <= 100
+        && data.maxConsumption is number && data.maxConsumption >= data.avgConsumption && data.maxConsumption <= 100
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidVehicle(data) {
+      return data.keys().hasAll(['id', 'model', 'plate', 'serverUpdatedAt'])
+        && data.keys().hasOnly(['id', 'model', 'plate', 'farm', 'isTemporary', 'serverUpdatedAt'])
+        && isValidId(data.id)
+        && data.model is string && data.model.size() >= 1 && data.model.size() <= 120
+        && data.plate is string && data.plate.size() >= 1 && data.plate.size() <= 32
+        && (!('farm' in data) || isValidFarm(data.farm))
+        && (!('isTemporary' in data) || data.isTemporary is bool)
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidDrone(data) {
+      return data.keys().hasAll(['id', 'name', 'model', 'label', 'serverUpdatedAt'])
+        && data.keys().hasOnly(['id', 'name', 'model', 'label', 'farm', 'createdAt', 'serverUpdatedAt'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.model is string && data.model.size() <= 100
+        && data.label is string && data.label.size() >= 1 && data.label.size() <= 180
+        && (!('farm' in data) || isValidFarm(data.farm))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidServiceRequest(data) {
+      return data.keys().hasAll([
+          'id', 'code', 'date', 'time', 'requesterName', 'farm', 'location',
+          'equipment', 'problemDescription', 'status', 'createdAt', 'serverUpdatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'code', 'date', 'time', 'requesterName', 'requesterSector',
+          'farm', 'location', 'equipment', 'problemDescription', 'urgency',
+          'priorityValidated', 'priorityValidatedAt', 'priorityValidatedBy',
+          'photos', 'status', 'linkedWorkOrderId', 'linkedWorkOrderCode',
+          'assignedOperatorName', 'linkedAt', 'createdAt', 'updatedAt', 'serverUpdatedAt'
+        ])
+        && isValidId(data.id)
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 64
+        && data.date is string && data.date.size() <= 32
+        && data.time is string && data.time.size() <= 16
+        && data.requesterName is string && data.requesterName.size() >= 1 && data.requesterName.size() <= 120
+        && (!('requesterSector' in data) || (data.requesterSector is string && data.requesterSector.size() <= 120))
+        && isValidFarm(data.farm)
+        && data.location is string && data.location.size() <= 200
+        && data.equipment is string && data.equipment.size() <= 200
+        && data.problemDescription is string && data.problemDescription.size() >= 1 && data.problemDescription.size() <= 4000
+        && (!('urgency' in data) || data.urgency in ['NORMAL', 'URGENTE'])
+        && (!('priorityValidated' in data) || data.priorityValidated is bool)
+        && (!('priorityValidatedAt' in data) || (data.priorityValidatedAt is string && data.priorityValidatedAt.size() <= 64))
+        && (!('priorityValidatedBy' in data) || (data.priorityValidatedBy is string && data.priorityValidatedBy.size() <= 120))
+        && (!('photos' in data) || (data.photos is list && data.photos.size() <= 20 && (data.photos.size() == 0 || data.photos[0] is string)))
+        && data.status in ['PENDENTE', 'EM_ATENDIMENTO', 'OS_GERADA', 'CONCLUIDA', 'CANCELADA']
+        && (!('linkedWorkOrderId' in data) || (data.linkedWorkOrderId is string && data.linkedWorkOrderId.size() <= 128))
+        && (!('linkedWorkOrderCode' in data) || (data.linkedWorkOrderCode is string && data.linkedWorkOrderCode.size() <= 64))
+        && (!('assignedOperatorName' in data) || (data.assignedOperatorName is string && data.assignedOperatorName.size() <= 120))
+        && (!('linkedAt' in data) || (data.linkedAt is string && data.linkedAt.size() <= 64))
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidOperatorRelease(data) {
+      return data.keys().hasAll(['id', 'token', 'operatorName', 'farm', 'active', 'createdAt', 'serverUpdatedAt'])
+        && data.keys().hasOnly(['id', 'token', 'operatorName', 'farm', 'active', 'createdAt', 'updatedAt', 'serverUpdatedAt'])
+        && isValidId(data.id)
+        && data.token is string && data.token.size() >= 4 && data.token.size() <= 128
+        && data.operatorName is string && data.operatorName.size() >= 1 && data.operatorName.size() <= 120
+        && (isValidFarm(data.farm) || data.farm == 'TODAS')
+        && data.active is bool
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidNr13Report(data) {
+      return data.keys().hasAll([
+          'id', 'code', 'equipmentTag', 'farm', 'sector', 'inspectionNature',
+          'inspectionDate', 'issueDate', 'technicalResponsible', 'creaNumber',
+          'artNumber', 'scope', 'parties', 'equipment', 'nr13Categorization',
+          'devicesVerification', 'ultrassomPoints', 'nonConformities',
+          'technicalOpinion', 'nextInspections', 'createdAt', 'serverUpdatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'code', 'vesselNumber', 'equipmentTag', 'equipmentDescription',
+          'farm', 'sector', 'inspectionNature', 'inspectionDate', 'inspectionEndDate',
+          'issueDate', 'technicalResponsible', 'creaNumber', 'artNumber', 'equipmentPhoto',
+          'companyData', 'scope', 'parties', 'equipment', 'nr13Categorization',
+          'vesselChecklist', 'devicesVerification', 'ultrassomPerformed', 'ultrassomPoints',
+          'ultrassomMatrix', 'ultrassomEquipmentUsed', 'safetyValveTechnical',
+          'pressureGaugeTechnical', 'documentationCheck', 'nonConformities',
+          'recommendations', 'technicalOpinion', 'operationalRestrictionsNotes',
+          'conclusionCheck', 'nextInspections', 'artAttachment',
+          'valveCalibrationAttachment', 'ultrassomAttachment', 'photos',
+          'createdAt', 'updatedAt', 'serverUpdatedAt'
+        ])
+        && isValidId(data.id)
+        && data.code is string && data.code.size() <= 64
+        && (!('vesselNumber' in data) || (data.vesselNumber is string && data.vesselNumber.size() <= 64))
+        && data.equipmentTag is string && data.equipmentTag.size() >= 1 && data.equipmentTag.size() <= 240
+        && (!('equipmentDescription' in data) || (data.equipmentDescription is string && data.equipmentDescription.size() <= 400))
+        && isValidFarm(data.farm)
+        && data.sector is string && data.sector.size() <= 160
+        && data.inspectionNature in ['INICIAL', 'PERIODICA', 'EXTRAORDINARIA']
+        && data.inspectionDate is string && data.inspectionDate.size() <= 32
+        && (!('inspectionEndDate' in data) || (data.inspectionEndDate is string && data.inspectionEndDate.size() <= 32))
+        && data.issueDate is string && data.issueDate.size() <= 32
+        && data.technicalResponsible is string && data.technicalResponsible.size() <= 160
+        && data.creaNumber is string && data.creaNumber.size() <= 80
+        && data.artNumber is string && data.artNumber.size() <= 80
+        && (!('equipmentPhoto' in data) || (data.equipmentPhoto is string && data.equipmentPhoto.size() <= 400000))
+        && (!('companyData' in data) || data.companyData is map)
+        && data.scope is map
+        && data.parties is map
+        && data.equipment is map
+        && data.nr13Categorization is map
+        && (!('vesselChecklist' in data) || data.vesselChecklist is map)
+        && data.devicesVerification is map
+        && (!('ultrassomPerformed' in data) || (data.ultrassomPerformed is string && data.ultrassomPerformed.size() <= 16))
+        && data.ultrassomPoints is list && data.ultrassomPoints.size() <= 100 && (data.ultrassomPoints.size() == 0 || data.ultrassomPoints[0] is map)
+        && (!('ultrassomMatrix' in data) || data.ultrassomMatrix is map)
+        && (!('ultrassomEquipmentUsed' in data) || (data.ultrassomEquipmentUsed is string && data.ultrassomEquipmentUsed.size() <= 200))
+        && (!('safetyValveTechnical' in data) || data.safetyValveTechnical is map)
+        && (!('pressureGaugeTechnical' in data) || data.pressureGaugeTechnical is map)
+        && (!('documentationCheck' in data) || data.documentationCheck is map)
+        && data.nonConformities is list && data.nonConformities.size() <= 100 && (data.nonConformities.size() == 0 || data.nonConformities[0] is map)
+        && (!('recommendations' in data) || (data.recommendations is string && data.recommendations.size() <= 4000))
+        && data.technicalOpinion in ['FAVORAVEL', 'FAVORAVEL_COM_RESTRICOES', 'DESFAVORAVEL', 'INCONCLUSIVO']
+        && (!('operationalRestrictionsNotes' in data) || (data.operationalRestrictionsNotes is string && data.operationalRestrictionsNotes.size() <= 4000))
+        && (!('conclusionCheck' in data) || data.conclusionCheck is map)
+        && data.nextInspections is map
+        && (!('artAttachment' in data) || data.artAttachment is map)
+        && (!('valveCalibrationAttachment' in data) || data.valveCalibrationAttachment is map)
+        && (!('ultrassomAttachment' in data) || data.ultrassomAttachment is map)
+        && (!('photos' in data) || (data.photos is list && data.photos.size() <= 30 && (data.photos.size() == 0 || data.photos[0] is string)))
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidNr13Vessel(data) {
+      return data.keys().hasAll([
+          'id', 'farm', 'vesselNumber', 'equipmentTag', 'sector',
+          'companyData', 'equipment', 'nr13Categorization', 'createdAt', 'serverUpdatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'farm', 'assetType', 'vesselNumber', 'equipmentTag', 'sector',
+          'companyData', 'equipment', 'nr13Categorization', 'linkedValveTag',
+          'linkedValveSpecs', 'linkedGaugeTag', 'linkedGaugeSpecs',
+          'defaultUltrassomMatrix', 'equipmentPhoto', 'notes',
+          'createdAt', 'updatedAt', 'serverUpdatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidFarm(data.farm)
+        && (!('assetType' in data) || data.assetType in ['VP', 'CP'])
+        && data.vesselNumber is string && data.vesselNumber.size() >= 1 && data.vesselNumber.size() <= 64
+        && data.equipmentTag is string && data.equipmentTag.size() >= 1 && data.equipmentTag.size() <= 240
+        && data.sector is string && data.sector.size() <= 160
+        && data.companyData is map
+        && data.equipment is map
+        && data.nr13Categorization is map
+        && (!('linkedValveTag' in data) || (data.linkedValveTag is string && data.linkedValveTag.size() <= 80))
+        && (!('linkedValveSpecs' in data) || data.linkedValveSpecs is map)
+        && (!('linkedGaugeTag' in data) || (data.linkedGaugeTag is string && data.linkedGaugeTag.size() <= 80))
+        && (!('linkedGaugeSpecs' in data) || data.linkedGaugeSpecs is map)
+        && (!('defaultUltrassomMatrix' in data) || data.defaultUltrassomMatrix is map)
+        && (!('equipmentPhoto' in data) || (data.equipmentPhoto is string && data.equipmentPhoto.size() <= 400000))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 4000))
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidValveCalibration(data) {
+      return data.keys().hasAll([
+          'id', 'code', 'tag', 'farm', 'equipmentLinked', 'sector', 'manufacturer',
+          'model', 'connectionSize', 'fluidType', 'setPressure', 'openingPressure',
+          'pressureUnit', 'tightnessTest', 'testFluid', 'testBenchStandard',
+          'standardCertNumber', 'technicianName', 'calibrationDate',
+          'nextCalibrationDate', 'status', 'createdAt', 'serverUpdatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'code', 'tag', 'farm', 'equipmentLinked', 'sector', 'manufacturer',
+          'model', 'connectionSize', 'fluidType', 'setPressure', 'openingPressure',
+          'reseatPressure', 'pressureUnit', 'tightnessTest', 'testFluid', 'testBenchStandard',
+          'standardCertNumber', 'technicianName', 'calibrationDate', 'nextCalibrationDate',
+          'status', 'notes', 'certificateAttachment', 'createdAt', 'updatedAt', 'serverUpdatedAt'
+        ])
+        && isValidId(data.id)
+        && data.code is string && data.code.size() <= 64
+        && data.tag is string && data.tag.size() >= 1 && data.tag.size() <= 80
+        && isValidFarm(data.farm)
+        && data.equipmentLinked is string && data.equipmentLinked.size() <= 200
+        && data.sector is string && data.sector.size() <= 160
+        && data.manufacturer is string && data.manufacturer.size() <= 120
+        && data.model is string && data.model.size() <= 120
+        && data.connectionSize is string && data.connectionSize.size() <= 80
+        && data.fluidType is string && data.fluidType.size() <= 80
+        && data.setPressure is number
+        && data.openingPressure is number
+        && (!('reseatPressure' in data) || data.reseatPressure is number)
+        && data.pressureUnit in ['bar', 'kgf/cm²', 'psi']
+        && data.tightnessTest in ['SEM_VAZAMENTO', 'COM_VAZAMENTO']
+        && data.testFluid is string && data.testFluid.size() <= 100
+        && data.testBenchStandard is string && data.testBenchStandard.size() <= 200
+        && data.standardCertNumber is string && data.standardCertNumber.size() <= 120
+        && data.technicianName is string && data.technicianName.size() <= 160
+        && data.calibrationDate is string && data.calibrationDate.size() <= 32
+        && data.nextCalibrationDate is string && data.nextCalibrationDate.size() <= 32
+        && data.status in ['APROVADA', 'REPROVADA', 'AJUSTADA']
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000))
+        && (!('certificateAttachment' in data) || data.certificateAttachment is map)
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidGaugeCalibration(data) {
+      return data.keys().hasAll([
+          'id', 'code', 'tag', 'farm', 'equipmentLinked', 'sector', 'manufacturer',
+          'gaugeType', 'scaleMin', 'scaleMax', 'unit', 'resolution', 'accuracyClass',
+          'standardUsed', 'standardCertNumber', 'calibrationDate', 'nextCalibrationDate',
+          'calibratedBy', 'maxFoundError', 'maxAllowedError', 'status', 'createdAt', 'serverUpdatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'code', 'tag', 'farm', 'equipmentLinked', 'sector', 'manufacturer',
+          'model', 'gaugeType', 'scaleMin', 'scaleMax', 'unit', 'resolution', 'accuracyClass',
+          'standardUsed', 'standardCertNumber', 'calibrationDate', 'nextCalibrationDate',
+          'calibratedBy', 'maxFoundError', 'maxAllowedError', 'testPoints', 'status',
+          'notes', 'certificateAttachment', 'createdAt', 'updatedAt', 'serverUpdatedAt'
+        ])
+        && isValidId(data.id)
+        && data.code is string && data.code.size() <= 64
+        && data.tag is string && data.tag.size() >= 1 && data.tag.size() <= 80
+        && isValidFarm(data.farm)
+        && data.equipmentLinked is string && data.equipmentLinked.size() <= 200
+        && data.sector is string && data.sector.size() <= 160
+        && data.manufacturer is string && data.manufacturer.size() <= 120
+        && (!('model' in data) || (data.model is string && data.model.size() <= 120))
+        && data.gaugeType in ['ANALOGICO', 'DIGITAL']
+        && data.scaleMin is number
+        && data.scaleMax is number
+        && data.unit in ['bar', 'kgf/cm²', 'psi']
+        && data.resolution is number
+        && data.accuracyClass is string && data.accuracyClass.size() <= 120
+        && data.standardUsed is string && data.standardUsed.size() <= 200
+        && data.standardCertNumber is string && data.standardCertNumber.size() <= 120
+        && data.calibrationDate is string && data.calibrationDate.size() <= 32
+        && data.nextCalibrationDate is string && data.nextCalibrationDate.size() <= 32
+        && data.calibratedBy is string && data.calibratedBy.size() <= 160
+        && data.maxFoundError is number
+        && data.maxAllowedError is number
+        && (!('testPoints' in data) || (data.testPoints is list && data.testPoints.size() <= 60 && (data.testPoints.size() == 0 || data.testPoints[0] is map)))
+        && data.status in ['APROVADO', 'REPROVADO', 'AJUSTADO']
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000))
+        && (!('certificateAttachment' in data) || data.certificateAttachment is map)
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidUltrassomEquipment(data) {
+      return data.keys().hasAll([
+          'id', 'name', 'serialNumber', 'certificateNumber', 'calibrationDate',
+          'nextCalibrationDate', 'status', 'createdAt', 'serverUpdatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'name', 'serialNumber', 'certificateNumber', 'calibrationDate',
+          'nextCalibrationDate', 'calibrationLab', 'measurementRange', 'resolution',
+          'uncertainty', 'status', 'notes', 'certificateAttachment',
+          'createdAt', 'updatedAt', 'serverUpdatedAt'
+        ])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
+        && data.serialNumber is string && data.serialNumber.size() <= 120
+        && data.certificateNumber is string && data.certificateNumber.size() <= 120
+        && data.calibrationDate is string && data.calibrationDate.size() <= 32
+        && data.nextCalibrationDate is string && data.nextCalibrationDate.size() <= 32
+        && (!('calibrationLab' in data) || (data.calibrationLab is string && data.calibrationLab.size() <= 160))
+        && (!('measurementRange' in data) || (data.measurementRange is string && data.measurementRange.size() <= 120))
+        && (!('resolution' in data) || (data.resolution is string && data.resolution.size() <= 80))
+        && (!('uncertainty' in data) || (data.uncertainty is string && data.uncertainty.size() <= 80))
+        && data.status in ['CALIBRADO', 'VENCIDO', 'MANUTENCAO']
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000))
+        && (!('certificateAttachment' in data) || data.certificateAttachment is map)
+        && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && data.serverUpdatedAt == request.time;
+    }
+
+    function isValidDeletedTombstone(data) {
+      return data.keys().hasAll(['id', 'deletedAt', 'serverUpdatedAt'])
+        && data.keys().hasOnly(['id', 'deletedAt', 'serverUpdatedAt'])
+        && isValidId(data.id)
+        && data.deletedAt is string && data.deletedAt.size() <= 64
+        && data.serverUpdatedAt == request.time;
+    }
+
+    // ==================== COLLECTION RULES ====================
+
+    match /test/{docId} {
+      allow get: if isSignedIn() && isValidId(docId);
+      allow list, write: if false;
+    }
+
+    match /admins/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list, write: if false;
+    }
+
+    match /checklists/{checklistId} {
+      allow get: if isSignedIn() && isValidId(checklistId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(checklistId) && isValidChecklist(incoming()) && incoming().id == checklistId;
+      allow update: if isSignedIn() && isValidId(checklistId) && isValidChecklist(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'farm', 'location', 'date', 'time', 'inspector', 'shift', 'droneModel',
+            'vehiclePlate', 'vehicleModel', 'initialKm', 'finalKm', 'vehicleVisual',
+            'signatureUrl', 'items', 'generalNotes', 'statusSummary', 'workOrderIds',
+            'updatedAt', 'isDraft', 'serverUpdatedAt'
+          ]) ||
+          (existing().code == 'CHK-RASCUNHO' && incoming().diff(existing()).affectedKeys().hasOnly([
+            'code', 'farm', 'location', 'date', 'time', 'inspector', 'shift', 'droneModel',
+            'vehiclePlate', 'vehicleModel', 'initialKm', 'finalKm', 'vehicleVisual',
+            'signatureUrl', 'items', 'generalNotes', 'statusSummary', 'workOrderIds',
+            'updatedAt', 'isDraft', 'serverUpdatedAt'
+          ]))
+        );
+      allow delete: if isSignedIn() && isValidId(checklistId);
+    }
+
+    match /workOrders/{workOrderId} {
+      allow get: if isSignedIn() && isValidId(workOrderId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(workOrderId) && isValidWorkOrder(incoming()) && incoming().id == workOrderId;
+      allow update: if isSignedIn() && isValidId(workOrderId) && isValidWorkOrder(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && ((existing().status != 'CONCLUIDA' && existing().status != 'CANCELADA') || isAdmin())
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'farm', 'equipment', 'maintenanceType', 'date', 'time', 'location',
+            'responsible', 'thirdParty', 'isThirdParty', 'problemDescription',
+            'materials', 'photosBefore', 'photosAfter', 'status', 'priority',
+            'solutionDescription', 'completionDate', 'completionTime',
+            'serviceRequestId', 'serviceRequestCode', 'requesterName',
+            'updatedAt', 'serverUpdatedAt'
+          ]) ||
+          (existing().code == 'OS-RASCUNHO' && incoming().diff(existing()).affectedKeys().hasOnly([
+            'code', 'farm', 'equipment', 'maintenanceType', 'date', 'time', 'location',
+            'responsible', 'thirdParty', 'isThirdParty', 'problemDescription',
+            'materials', 'photosBefore', 'photosAfter', 'status', 'priority',
+            'solutionDescription', 'completionDate', 'completionTime',
+            'checklistSourceId', 'checklistItemDescription',
+            'serviceRequestId', 'serviceRequestCode', 'requesterName',
+            'updatedAt', 'serverUpdatedAt'
+          ]))
+        );
+      allow delete: if isSignedIn() && isValidId(workOrderId);
+    }
+
+    match /fleetMonthlyUpdates/{updateId} {
+      allow get: if isSignedIn() && isValidId(updateId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(updateId) && isValidFleetUpdate(incoming()) && incoming().id == updateId;
+      allow update: if isSignedIn() && isValidId(updateId) && isValidFleetUpdate(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'farm', 'mileage', 'driver', 'date', 'time', 'plate', 'vehicleModel',
+            'preventiveMaintenanceLast30Days', 'preventiveMaintenanceNotes',
+            'hasIncidentLast30Days', 'incidentNotes', 'incidentPhotos',
+            'visualInspection', 'notes', 'updatedAt', 'adminAcknowledged',
+            'acknowledgedAt', 'acknowledgedBy', 'acknowledgementJustification',
+            'serverUpdatedAt'
+          ])
+        );
+      allow delete: if isSignedIn() && isValidId(updateId);
+    }
+
+    match /fuelLogs/{fuelLogId} {
+      allow get: if isSignedIn() && isValidId(fuelLogId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(fuelLogId) && isValidFuelLog(incoming()) && incoming().id == fuelLogId;
+      allow update: if isSignedIn() && isValidId(fuelLogId) && isValidFuelLog(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'date', 'time', 'driver', 'plate', 'vehicleModel', 'fuelType',
+            'liters', 'km', 'location', 'notes', 'updatedAt', 'serverUpdatedAt'
+          ])
+        );
+      allow delete: if isSignedIn() && isValidId(fuelLogId);
+    }
+
+    match /fuelConsumptionRules/{ruleId} {
+      allow get: if isSignedIn() && isValidId(ruleId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(ruleId) && isValidFuelRule(incoming()) && incoming().id == ruleId;
+      allow update: if isSignedIn() && isValidId(ruleId) && isValidFuelRule(incoming())
+        && incoming().id == existing().id
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'plate', 'minConsumption', 'avgConsumption', 'maxConsumption',
+            'updatedAt', 'serverUpdatedAt'
+          ])
+        );
+      allow delete: if isSignedIn() && isValidId(ruleId) && ruleId != 'fcr_default';
+    }
+
+    match /vehicles/{vehicleId} {
+      allow get: if isSignedIn() && isValidId(vehicleId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(vehicleId) && isValidVehicle(incoming()) && incoming().id == vehicleId;
+      allow update: if isSignedIn() && isValidId(vehicleId) && isValidVehicle(incoming())
+        && incoming().id == existing().id
+        && incoming().diff(existing()).affectedKeys().hasOnly(['model', 'plate', 'farm', 'isTemporary', 'serverUpdatedAt']);
+      allow delete: if isSignedIn() && isValidId(vehicleId);
+    }
+
+    match /drones/{droneId} {
+      allow get: if isSignedIn() && isValidId(droneId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(droneId) && isValidDrone(incoming()) && incoming().id == droneId;
+      allow update: if isSignedIn() && isValidId(droneId) && isValidDrone(incoming())
+        && incoming().id == existing().id
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'model', 'label', 'farm', 'serverUpdatedAt']);
+      allow delete: if isSignedIn() && isValidId(droneId);
+    }
+
+    match /serviceRequests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(requestId) && isValidServiceRequest(incoming()) && incoming().id == requestId;
+      allow update: if isSignedIn() && isValidId(requestId) && isValidServiceRequest(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && ((existing().status != 'CONCLUIDA' && existing().status != 'CANCELADA') || isAdmin())
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'urgency', 'priorityValidated', 'priorityValidatedAt', 'priorityValidatedBy',
+            'status', 'linkedWorkOrderId', 'linkedWorkOrderCode', 'assignedOperatorName',
+            'linkedAt', 'updatedAt', 'serverUpdatedAt'
+          ])
+        );
+      allow delete: if isSignedIn() && isValidId(requestId);
+    }
+
+    match /operatorServiceReleases/{releaseId} {
+      allow get: if isSignedIn() && isValidId(releaseId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(releaseId) && isValidOperatorRelease(incoming()) && incoming().id == releaseId;
+      allow update: if isSignedIn() && isValidId(releaseId) && isValidOperatorRelease(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['operatorName', 'farm', 'active', 'updatedAt', 'serverUpdatedAt']);
+      allow delete: if isSignedIn() && isValidId(releaseId);
+    }
+
+    match /nr13Reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(reportId) && isValidNr13Report(incoming()) && incoming().id == reportId;
+      allow update: if isSignedIn() && isValidId(reportId) && isValidNr13Report(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'code', 'vesselNumber', 'equipmentTag', 'equipmentDescription', 'farm',
+          'sector', 'inspectionNature', 'inspectionDate', 'inspectionEndDate',
+          'issueDate', 'technicalResponsible', 'creaNumber', 'artNumber',
+          'equipmentPhoto', 'companyData', 'scope', 'parties', 'equipment',
+          'nr13Categorization', 'vesselChecklist', 'devicesVerification',
+          'ultrassomPerformed', 'ultrassomPoints', 'ultrassomMatrix',
+          'ultrassomEquipmentUsed', 'safetyValveTechnical', 'pressureGaugeTechnical',
+          'documentationCheck', 'nonConformities', 'recommendations',
+          'technicalOpinion', 'operationalRestrictionsNotes', 'conclusionCheck',
+          'nextInspections', 'artAttachment', 'valveCalibrationAttachment',
+          'ultrassomAttachment', 'photos', 'updatedAt', 'serverUpdatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(reportId);
+    }
+
+    match /nr13Vessels/{vesselId} {
+      allow get: if isSignedIn() && isValidId(vesselId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(vesselId) && isValidNr13Vessel(incoming()) && incoming().id == vesselId;
+      allow update: if isSignedIn() && isValidId(vesselId) && isValidNr13Vessel(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'farm', 'assetType', 'vesselNumber', 'equipmentTag', 'sector',
+          'companyData', 'equipment', 'nr13Categorization', 'linkedValveTag',
+          'linkedValveSpecs', 'linkedGaugeTag', 'linkedGaugeSpecs',
+          'defaultUltrassomMatrix', 'equipmentPhoto', 'notes', 'updatedAt', 'serverUpdatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(vesselId);
+    }
+
+    match /valveCalibrations/{calibrationId} {
+      allow get: if isSignedIn() && isValidId(calibrationId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(calibrationId) && isValidValveCalibration(incoming()) && incoming().id == calibrationId;
+      allow update: if isSignedIn() && isValidId(calibrationId) && isValidValveCalibration(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'code', 'tag', 'farm', 'equipmentLinked', 'sector', 'manufacturer',
+          'model', 'connectionSize', 'fluidType', 'setPressure', 'openingPressure',
+          'reseatPressure', 'pressureUnit', 'tightnessTest', 'testFluid',
+          'testBenchStandard', 'standardCertNumber', 'technicianName',
+          'calibrationDate', 'nextCalibrationDate', 'status', 'notes',
+          'certificateAttachment', 'updatedAt', 'serverUpdatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(calibrationId);
+    }
+
+    match /gaugeCalibrations/{calibrationId} {
+      allow get: if isSignedIn() && isValidId(calibrationId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(calibrationId) && isValidGaugeCalibration(incoming()) && incoming().id == calibrationId;
+      allow update: if isSignedIn() && isValidId(calibrationId) && isValidGaugeCalibration(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'code', 'tag', 'farm', 'equipmentLinked', 'sector', 'manufacturer',
+          'model', 'gaugeType', 'scaleMin', 'scaleMax', 'unit', 'resolution',
+          'accuracyClass', 'standardUsed', 'standardCertNumber', 'calibrationDate',
+          'nextCalibrationDate', 'calibratedBy', 'maxFoundError', 'maxAllowedError',
+          'testPoints', 'status', 'notes', 'certificateAttachment', 'updatedAt', 'serverUpdatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(calibrationId);
+    }
+
+    match /ultrassomEquipments/{equipmentId} {
+      allow get: if isSignedIn() && isValidId(equipmentId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(equipmentId) && isValidUltrassomEquipment(incoming()) && incoming().id == equipmentId;
+      allow update: if isSignedIn() && isValidId(equipmentId) && isValidUltrassomEquipment(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'serialNumber', 'certificateNumber', 'calibrationDate',
+          'nextCalibrationDate', 'calibrationLab', 'measurementRange', 'resolution',
+          'uncertainty', 'status', 'notes', 'certificateAttachment', 'updatedAt', 'serverUpdatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(equipmentId);
+    }
+
+    match /deletedTombstones/{tombstoneId} {
+      allow get: if isSignedIn() && isValidId(tombstoneId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(tombstoneId) && isValidDeletedTombstone(incoming()) && incoming().id == tombstoneId;
+      allow update: if isSignedIn() && isValidId(tombstoneId) && isValidDeletedTombstone(incoming()) && incoming().id == existing().id;
+      allow delete: if isSignedIn() && isValidId(tombstoneId);
+    }
+  }
+}

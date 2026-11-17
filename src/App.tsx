@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
+import { FirebaseProvider, useFirebase } from './context/FirebaseContext';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
 import { ChecklistList } from './components/ChecklistList';
@@ -57,6 +58,8 @@ const AppContent: React.FC = () => {
     activeOperatorRelease,
     previewImage
   } = useApp();
+  const { authError, retryAnonymousAuth } = useFirebase();
+  const [dismissFirebaseNotice, setDismissFirebaseNotice] = useState(false);
 
   const isLeanOnlyPortal =
     userRole !== 'ADMIN' &&
@@ -95,6 +98,40 @@ const AppContent: React.FC = () => {
   return (
     <div className="min-h-screen w-full max-w-full bg-slate-100 flex flex-col font-sans overflow-x-clip">
       <Navbar />
+
+      {/* Admin-only Firebase Anonymous Auth setup guidance if not yet toggled on in Firebase Console */}
+      {userRole === 'ADMIN' && authError === 'ANONYMOUS_DISABLED' && !dismissFirebaseNotice && (
+        <div className="bg-amber-50 border-b border-amber-300 text-amber-950 px-4 py-2.5 text-xs shadow-2xs no-print">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <span>
+              <strong>Configuração Firebase pendente:</strong> para sincronizar todos os celulares sem exigir login no Gmail, ative o provedor <strong>Anônimo</strong> em{' '}
+              <a
+                href="https://console.firebase.google.com/project/lunar-sled-453120-a5/authentication/providers"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-bold text-amber-900 hover:text-amber-700"
+              >
+                Firebase Console → Authentication → Sign-in method
+              </a>
+              .
+            </span>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={retryAnonymousAuth}
+                className="px-2.5 py-1 bg-amber-900 text-white hover:bg-amber-800 rounded-md font-bold cursor-pointer"
+              >
+                Já ativei, conectar agora
+              </button>
+              <button
+                onClick={() => setDismissFirebaseNotice(true)}
+                className="px-2 py-1 text-amber-800 hover:text-amber-950 font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Offline Mode Reassurance Banner */}
       {!isOnline && (
@@ -238,9 +275,11 @@ const AppContent: React.FC = () => {
 export default function App() {
   return (
     <ErrorBoundary>
-      <AppProvider>
-        <AppContent />
-      </AppProvider>
+      <FirebaseProvider>
+        <AppProvider>
+          <AppContent />
+        </AppProvider>
+      </FirebaseProvider>
     </ErrorBoundary>
   );
 }

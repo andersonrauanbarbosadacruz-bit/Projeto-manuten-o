@@ -1,0 +1,10 @@
+.aistudio/
+.git/
+data/backups/
+DRAFT_firestore.rules
+security_spec.md
+firestore.rules.test.ts
+eslint.config.js
+*.log
+.env*
+!.env.example

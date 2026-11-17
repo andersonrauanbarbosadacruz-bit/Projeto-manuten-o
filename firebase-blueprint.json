@@ -1,0 +1,488 @@
+{
+  "entities": {
+    "ChecklistRecord": {
+      "title": "ChecklistRecord",
+      "description": "Checklist operacional de máquinas, geradores, irrigação, drones ou veículos.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "type": { "type": "string", "enum": ["SALA_DE_MAQUINAS", "GERADOR", "IRRIGACAO", "DRONE", "VEICULO"] },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis"] },
+        "location": { "type": "string", "maxLength": 200 },
+        "date": { "type": "string", "maxLength": 32 },
+        "time": { "type": "string", "maxLength": 16 },
+        "inspector": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "shift": { "type": "string", "maxLength": 40 },
+        "droneModel": { "type": "string", "maxLength": 120 },
+        "vehiclePlate": { "type": "string", "maxLength": 32 },
+        "vehicleModel": { "type": "string", "maxLength": 120 },
+        "initialKm": { "type": "string", "maxLength": 40 },
+        "finalKm": { "type": "string", "maxLength": 40 },
+        "vehicleVisual": { "type": "object" },
+        "signatureUrl": { "type": "string", "maxLength": 350000 },
+        "items": { "type": "array" },
+        "generalNotes": { "type": "string", "maxLength": 4000 },
+        "statusSummary": { "type": "string", "enum": ["CONFORME", "COM_PENDENCIAS", "CRITICO", "EM_ANDAMENTO"] },
+        "workOrderIds": { "type": "array" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "isDraft": { "type": "boolean" },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "type", "farm", "location", "date", "time", "inspector", "items", "statusSummary", "createdAt", "serverUpdatedAt"]
+    },
+    "WorkOrder": {
+      "title": "WorkOrder",
+      "description": "Ordem de Serviço de manutenção preventiva ou corretiva.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis"] },
+        "equipment": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "maintenanceType": { "type": "string", "enum": ["PREVENTIVA", "CORRETIVA"] },
+        "date": { "type": "string", "maxLength": 32 },
+        "time": { "type": "string", "maxLength": 16 },
+        "location": { "type": "string", "maxLength": 200 },
+        "responsible": { "type": "string", "maxLength": 120 },
+        "thirdParty": { "type": "string", "maxLength": 160 },
+        "isThirdParty": { "type": "boolean" },
+        "problemDescription": { "type": "string", "maxLength": 4000 },
+        "materials": { "type": "array" },
+        "photosBefore": { "type": "array" },
+        "photosAfter": { "type": "array" },
+        "status": { "type": "string", "enum": ["ABERTA", "EM_ANDAMENTO", "CONCLUIDA", "CANCELADA", "RASCUNHO"] },
+        "priority": { "type": "string", "enum": ["BAIXA", "MEDIA", "ALTA", "URGENTE"] },
+        "solutionDescription": { "type": "string", "maxLength": 4000 },
+        "completionDate": { "type": "string", "maxLength": 32 },
+        "completionTime": { "type": "string", "maxLength": 16 },
+        "checklistSourceId": { "type": "string", "maxLength": 128 },
+        "checklistItemDescription": { "type": "string", "maxLength": 400 },
+        "serviceRequestId": { "type": "string", "maxLength": 128 },
+        "serviceRequestCode": { "type": "string", "maxLength": 64 },
+        "requesterName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "farm", "equipment", "maintenanceType", "date", "time", "location", "responsible", "thirdParty", "isThirdParty", "problemDescription", "materials", "photosBefore", "photosAfter", "status", "priority", "createdAt", "updatedAt", "serverUpdatedAt"]
+    },
+    "VehicleMonthlyUpdate": {
+      "title": "VehicleMonthlyUpdate",
+      "description": "Atualização mensal de veículos da frota com inspeção visual e sinistros.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis"] },
+        "mileage": { "type": "string", "maxLength": 40 },
+        "driver": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "date": { "type": "string", "maxLength": 32 },
+        "time": { "type": "string", "maxLength": 16 },
+        "plate": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "vehicleModel": { "type": "string", "maxLength": 120 },
+        "preventiveMaintenanceLast30Days": { "type": "boolean" },
+        "preventiveMaintenanceNotes": { "type": "string", "maxLength": 2000 },
+        "hasIncidentLast30Days": { "type": "boolean" },
+        "incidentNotes": { "type": "string", "maxLength": 2000 },
+        "incidentPhotos": { "type": "array" },
+        "visualInspection": { "type": "object" },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "adminAcknowledged": { "type": "boolean" },
+        "acknowledgedAt": { "type": "string", "maxLength": 64 },
+        "acknowledgedBy": { "type": "string", "maxLength": 120 },
+        "acknowledgementJustification": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "farm", "mileage", "driver", "date", "time", "plate", "preventiveMaintenanceLast30Days", "hasIncidentLast30Days", "visualInspection", "createdAt", "serverUpdatedAt"]
+    },
+    "FuelLogRecord": {
+      "title": "FuelLogRecord",
+      "description": "Registro de abastecimento de veículo da frota.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "date": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "time": { "type": "string", "maxLength": 16 },
+        "driver": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "plate": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "vehicleModel": { "type": "string", "maxLength": 120 },
+        "fuelType": { "type": "string", "enum": ["Gasolina", "Diesel Comum", "Diesel S10"] },
+        "liters": { "type": "number" },
+        "km": { "type": "number" },
+        "location": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis", "Posto L3", "Posto Raul Lins"] },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "date", "driver", "plate", "fuelType", "liters", "km", "location", "createdAt", "serverUpdatedAt"]
+    },
+    "FuelConsumptionRule": {
+      "title": "FuelConsumptionRule",
+      "description": "Parâmetros de consumo mínimo, médio e máximo (km/L) por placa ou padrão.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "plate": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "minConsumption": { "type": "number" },
+        "avgConsumption": { "type": "number" },
+        "maxConsumption": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "plate", "minConsumption", "avgConsumption", "maxConsumption", "serverUpdatedAt"]
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "Veículo cadastrado na frota (incluindo temporário AAA0A00).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "model": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "plate": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis"] },
+        "isTemporary": { "type": "boolean" },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "model", "plate", "serverUpdatedAt"]
+    },
+    "DroneAsset": {
+      "title": "DroneAsset",
+      "description": "Cadastro de drone agrícola.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "model": { "type": "string", "maxLength": 100 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "model", "label", "serverUpdatedAt"]
+    },
+    "ServiceRequest": {
+      "title": "ServiceRequest",
+      "description": "Solicitação de Serviço aberta pelos setores ou operadores.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "date": { "type": "string", "maxLength": 32 },
+        "time": { "type": "string", "maxLength": 16 },
+        "requesterName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "requesterSector": { "type": "string", "maxLength": 120 },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis"] },
+        "location": { "type": "string", "maxLength": 200 },
+        "equipment": { "type": "string", "maxLength": 200 },
+        "problemDescription": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "urgency": { "type": "string", "enum": ["NORMAL", "URGENTE"] },
+        "priorityValidated": { "type": "boolean" },
+        "priorityValidatedAt": { "type": "string", "maxLength": 64 },
+        "priorityValidatedBy": { "type": "string", "maxLength": 120 },
+        "photos": { "type": "array" },
+        "status": { "type": "string", "enum": ["PENDENTE", "EM_ATENDIMENTO", "OS_GERADA", "CONCLUIDA", "CANCELADA"] },
+        "linkedWorkOrderId": { "type": "string", "maxLength": 128 },
+        "linkedWorkOrderCode": { "type": "string", "maxLength": 64 },
+        "assignedOperatorName": { "type": "string", "maxLength": 120 },
+        "linkedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "date", "time", "requesterName", "farm", "location", "equipment", "problemDescription", "status", "createdAt", "serverUpdatedAt"]
+    },
+    "OperatorServiceRelease": {
+      "title": "OperatorServiceRelease",
+      "description": "Chave de liberação exclusiva de operadores para solicitações de serviço.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "token": { "type": "string", "minLength": 4, "maxLength": 128 },
+        "operatorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis", "TODAS"] },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "token", "operatorName", "farm", "active", "createdAt", "serverUpdatedAt"]
+    },
+    "NR13InspectionReport": {
+      "title": "NR13InspectionReport",
+      "description": "Laudo técnico de inspeção NR-13 de vasos de pressão e compressores.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "maxLength": 64 },
+        "vesselNumber": { "type": "string", "maxLength": 64 },
+        "equipmentTag": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "equipmentDescription": { "type": "string", "maxLength": 400 },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis"] },
+        "sector": { "type": "string", "maxLength": 160 },
+        "inspectionNature": { "type": "string", "enum": ["INICIAL", "PERIODICA", "EXTRAORDINARIA"] },
+        "inspectionDate": { "type": "string", "maxLength": 32 },
+        "inspectionEndDate": { "type": "string", "maxLength": 32 },
+        "issueDate": { "type": "string", "maxLength": 32 },
+        "technicalResponsible": { "type": "string", "maxLength": 160 },
+        "creaNumber": { "type": "string", "maxLength": 80 },
+        "artNumber": { "type": "string", "maxLength": 80 },
+        "equipmentPhoto": { "type": "string", "maxLength": 400000 },
+        "companyData": { "type": "object" },
+        "scope": { "type": "object" },
+        "parties": { "type": "object" },
+        "equipment": { "type": "object" },
+        "nr13Categorization": { "type": "object" },
+        "vesselChecklist": { "type": "object" },
+        "devicesVerification": { "type": "object" },
+        "ultrassomPerformed": { "type": "string", "maxLength": 16 },
+        "ultrassomPoints": { "type": "array" },
+        "ultrassomMatrix": { "type": "object" },
+        "ultrassomEquipmentUsed": { "type": "string", "maxLength": 200 },
+        "safetyValveTechnical": { "type": "object" },
+        "pressureGaugeTechnical": { "type": "object" },
+        "documentationCheck": { "type": "object" },
+        "nonConformities": { "type": "array" },
+        "recommendations": { "type": "string", "maxLength": 4000 },
+        "technicalOpinion": { "type": "string", "enum": ["FAVORAVEL", "FAVORAVEL_COM_RESTRICOES", "DESFAVORAVEL", "INCONCLUSIVO"] },
+        "operationalRestrictionsNotes": { "type": "string", "maxLength": 4000 },
+        "conclusionCheck": { "type": "object" },
+        "nextInspections": { "type": "object" },
+        "artAttachment": { "type": "object" },
+        "valveCalibrationAttachment": { "type": "object" },
+        "ultrassomAttachment": { "type": "object" },
+        "photos": { "type": "array" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "equipmentTag", "farm", "sector", "inspectionNature", "inspectionDate", "issueDate", "technicalResponsible", "creaNumber", "artNumber", "scope", "parties", "equipment", "nr13Categorization", "devicesVerification", "ultrassomPoints", "nonConformities", "technicalOpinion", "nextInspections", "createdAt", "serverUpdatedAt"]
+    },
+    "NR13VesselMaster": {
+      "title": "NR13VesselMaster",
+      "description": "Cadastro mestre de vasos de pressão e compressores NR-13.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis"] },
+        "assetType": { "type": "string", "enum": ["VP", "CP"] },
+        "vesselNumber": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "equipmentTag": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "sector": { "type": "string", "maxLength": 160 },
+        "companyData": { "type": "object" },
+        "equipment": { "type": "object" },
+        "nr13Categorization": { "type": "object" },
+        "linkedValveTag": { "type": "string", "maxLength": 80 },
+        "linkedValveSpecs": { "type": "object" },
+        "linkedGaugeTag": { "type": "string", "maxLength": 80 },
+        "linkedGaugeSpecs": { "type": "object" },
+        "defaultUltrassomMatrix": { "type": "object" },
+        "equipmentPhoto": { "type": "string", "maxLength": 400000 },
+        "notes": { "type": "string", "maxLength": 4000 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "farm", "vesselNumber", "equipmentTag", "sector", "companyData", "equipment", "nr13Categorization", "createdAt", "serverUpdatedAt"]
+    },
+    "ValveCalibrationRecord": {
+      "title": "ValveCalibrationRecord",
+      "description": "Registro de calibração de válvula de segurança PSV.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "maxLength": 64 },
+        "tag": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis"] },
+        "equipmentLinked": { "type": "string", "maxLength": 200 },
+        "sector": { "type": "string", "maxLength": 160 },
+        "manufacturer": { "type": "string", "maxLength": 120 },
+        "model": { "type": "string", "maxLength": 120 },
+        "connectionSize": { "type": "string", "maxLength": 80 },
+        "fluidType": { "type": "string", "maxLength": 80 },
+        "setPressure": { "type": "number" },
+        "openingPressure": { "type": "number" },
+        "reseatPressure": { "type": "number" },
+        "pressureUnit": { "type": "string", "enum": ["bar", "kgf/cm²", "psi"] },
+        "tightnessTest": { "type": "string", "enum": ["SEM_VAZAMENTO", "COM_VAZAMENTO"] },
+        "testFluid": { "type": "string", "maxLength": 100 },
+        "testBenchStandard": { "type": "string", "maxLength": 200 },
+        "standardCertNumber": { "type": "string", "maxLength": 120 },
+        "technicianName": { "type": "string", "maxLength": 160 },
+        "calibrationDate": { "type": "string", "maxLength": 32 },
+        "nextCalibrationDate": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["APROVADA", "REPROVADA", "AJUSTADA"] },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "certificateAttachment": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "tag", "farm", "equipmentLinked", "sector", "manufacturer", "model", "connectionSize", "fluidType", "setPressure", "openingPressure", "pressureUnit", "tightnessTest", "testFluid", "testBenchStandard", "standardCertNumber", "technicianName", "calibrationDate", "nextCalibrationDate", "status", "createdAt", "serverUpdatedAt"]
+    },
+    "GaugeCalibrationRecord": {
+      "title": "GaugeCalibrationRecord",
+      "description": "Registro de calibração de manômetro.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "maxLength": 64 },
+        "tag": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "farm": { "type": "string", "enum": ["Vale das Uvas", "Brasil Uvas", "Labrunier 1", "Labrunier 2", "Matriz", "Bravis"] },
+        "equipmentLinked": { "type": "string", "maxLength": 200 },
+        "sector": { "type": "string", "maxLength": 160 },
+        "manufacturer": { "type": "string", "maxLength": 120 },
+        "model": { "type": "string", "maxLength": 120 },
+        "gaugeType": { "type": "string", "enum": ["ANALOGICO", "DIGITAL"] },
+        "scaleMin": { "type": "number" },
+        "scaleMax": { "type": "number" },
+        "unit": { "type": "string", "enum": ["bar", "kgf/cm²", "psi"] },
+        "resolution": { "type": "number" },
+        "accuracyClass": { "type": "string", "maxLength": 120 },
+        "standardUsed": { "type": "string", "maxLength": 200 },
+        "standardCertNumber": { "type": "string", "maxLength": 120 },
+        "calibrationDate": { "type": "string", "maxLength": 32 },
+        "nextCalibrationDate": { "type": "string", "maxLength": 32 },
+        "calibratedBy": { "type": "string", "maxLength": 160 },
+        "maxFoundError": { "type": "number" },
+        "maxAllowedError": { "type": "number" },
+        "testPoints": { "type": "array" },
+        "status": { "type": "string", "enum": ["APROVADO", "REPROVADO", "AJUSTADO"] },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "certificateAttachment": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "tag", "farm", "equipmentLinked", "sector", "manufacturer", "gaugeType", "scaleMin", "scaleMax", "unit", "resolution", "accuracyClass", "standardUsed", "standardCertNumber", "calibrationDate", "nextCalibrationDate", "calibratedBy", "maxFoundError", "maxAllowedError", "status", "createdAt", "serverUpdatedAt"]
+    },
+    "UltrassomEquipmentRecord": {
+      "title": "UltrassomEquipmentRecord",
+      "description": "Cadastro de equipamento de medição de espessura por ultrassom.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "serialNumber": { "type": "string", "maxLength": 120 },
+        "certificateNumber": { "type": "string", "maxLength": 120 },
+        "calibrationDate": { "type": "string", "maxLength": 32 },
+        "nextCalibrationDate": { "type": "string", "maxLength": 32 },
+        "calibrationLab": { "type": "string", "maxLength": 160 },
+        "measurementRange": { "type": "string", "maxLength": 120 },
+        "resolution": { "type": "string", "maxLength": 80 },
+        "uncertainty": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["CALIBRADO", "VENCIDO", "MANUTENCAO"] },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "certificateAttachment": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "serialNumber", "certificateNumber", "calibrationDate", "nextCalibrationDate", "status", "createdAt", "serverUpdatedAt"]
+    },
+    "DeletedTombstone": {
+      "title": "DeletedTombstone",
+      "description": "Registro de exclusão permanente para evitar ressurreição em sincronizações offline.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deletedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "deletedAt", "serverUpdatedAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Usuário administrador autorizado.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["uid", "createdAt"]
+    },
+    "ConnectionTest": {
+      "title": "ConnectionTest",
+      "description": "Documento de teste de conectividade Firestore.",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" }
+      }
+    }
+  },
+  "firestore": {
+    "/checklists/{checklistId}": {
+      "schema": { "$ref": "#/entities/ChecklistRecord" },
+      "description": "Checklists operacionais multi-unidade."
+    },
+    "/workOrders/{workOrderId}": {
+      "schema": { "$ref": "#/entities/WorkOrder" },
+      "description": "Ordens de Serviço."
+    },
+    "/fleetMonthlyUpdates/{updateId}": {
+      "schema": { "$ref": "#/entities/VehicleMonthlyUpdate" },
+      "description": "Atualizações mensais de veículos da frota."
+    },
+    "/fuelLogs/{fuelLogId}": {
+      "schema": { "$ref": "#/entities/FuelLogRecord" },
+      "description": "Abastecimentos de combustível da frota."
+    },
+    "/fuelConsumptionRules/{ruleId}": {
+      "schema": { "$ref": "#/entities/FuelConsumptionRule" },
+      "description": "Parâmetros de consumo mínimo, médio e máximo."
+    },
+    "/vehicles/{vehicleId}": {
+      "schema": { "$ref": "#/entities/Vehicle" },
+      "description": "Cadastro de placas e veículos (inclui AAA0A00 temporário)."
+    },
+    "/drones/{droneId}": {
+      "schema": { "$ref": "#/entities/DroneAsset" },
+      "description": "Cadastro de drones agrícolas."
+    },
+    "/serviceRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/ServiceRequest" },
+      "description": "Solicitações de serviço."
+    },
+    "/operatorServiceReleases/{releaseId}": {
+      "schema": { "$ref": "#/entities/OperatorServiceRelease" },
+      "description": "Liberações exclusivas de operadores."
+    },
+    "/nr13Reports/{reportId}": {
+      "schema": { "$ref": "#/entities/NR13InspectionReport" },
+      "description": "Laudos NR-13."
+    },
+    "/nr13Vessels/{vesselId}": {
+      "schema": { "$ref": "#/entities/NR13VesselMaster" },
+      "description": "Vasos de pressão e compressores NR-13."
+    },
+    "/valveCalibrations/{calibrationId}": {
+      "schema": { "$ref": "#/entities/ValveCalibrationRecord" },
+      "description": "Calibrações de válvulas PSV."
+    },
+    "/gaugeCalibrations/{calibrationId}": {
+      "schema": { "$ref": "#/entities/GaugeCalibrationRecord" },
+      "description": "Calibrações de manômetros."
+    },
+    "/ultrassomEquipments/{equipmentId}": {
+      "schema": { "$ref": "#/entities/UltrassomEquipmentRecord" },
+      "description": "Equipamentos de medição por ultrassom."
+    },
+    "/deletedTombstones/{tombstoneId}": {
+      "schema": { "$ref": "#/entities/DeletedTombstone" },
+      "description": "Tombstones de exclusão permanente."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Administradores autorizados."
+    },
+    "/test/{docId}": {
+      "schema": { "$ref": "#/entities/ConnectionTest" },
+      "description": "Documento usado pelo check inicial de conectividade."
+    }
+  }
+}
