@@ -13,11 +13,11 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         useCredentials: true,
         includeAssets: [
+          'favicon.ico',
           'apple-touch-icon.png',
-          'apple-touch-icon-v5.png',
-          'pwa-icon-512-v5.png',
-          'pwa-icon-1254-v5.png',
-          'pwa-icon-maskable-1024-v5.png',
+          'apple-touch-icon-v6.png',
+          'pwa-icon-512-v6.png',
+          'pwa-icon-maskable-512-v6.png',
         ],
         manifest: {
           id: '/',
@@ -32,20 +32,14 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: '/pwa-icon-1254-v5.png',
-              sizes: '1254x1254',
-              type: 'image/png',
-              purpose: 'any',
-            },
-            {
-              src: '/pwa-icon-512-v5.png',
+              src: '/pwa-icon-512-v6.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-icon-maskable-1024-v5.png',
-              sizes: '1024x1024',
+              src: '/pwa-icon-maskable-512-v6.png',
+              sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
             },
@@ -57,7 +51,7 @@ export default defineConfig(() => {
           cleanupOutdatedCaches: true,
           navigateFallback: null,
           globPatterns: ['**/*.{js,css,ico,png,jpg,svg,woff,woff2}'],
-          globIgnores: ['**/index.html', '**/manifest.webmanifest'],
+          globIgnores: ['**/index.html', '**/manifest.webmanifest', '**/assets/aistudio/transferir*'],
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
           runtimeCaching: [
             {
