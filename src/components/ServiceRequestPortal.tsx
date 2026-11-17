@@ -26,6 +26,7 @@ import {
   getServiceRequestQueueInfo,
   QueuedServiceRequest
 } from '../utils/serviceRequestQueue';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface ServiceRequestPortalProps {
   embedded?: boolean;
@@ -858,6 +859,7 @@ export const ServiceRequestPortal: React.FC<ServiceRequestPortalProps> = ({ embe
                 {lockedFarm}
               </span>
             )}
+            <PWAInstallButton compact />
             <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-fuchsia-50 text-fuchsia-950 border border-fuchsia-200 whitespace-nowrap">
               Solicitante
             </span>

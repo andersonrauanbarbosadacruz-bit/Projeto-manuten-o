@@ -22,6 +22,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { FARMS, Farm } from '../types';
 import { getChecklistEffectiveStatus } from '../utils/complianceHelper';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export const Navbar: React.FC = () => {
   const { 
@@ -297,6 +298,9 @@ export const Navbar: React.FC = () => {
                   <RefreshCw className="w-3 h-3 text-emerald-600 opacity-70 hover:opacity-100" />
                 </button>
               )}
+
+              {/* In-App PWA Install (Android & iOS) */}
+              <PWAInstallButton />
 
               {/* Mobile QR & Link Generator (Admin only) */}
               {userRole === 'ADMIN' && (

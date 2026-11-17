@@ -20,6 +20,7 @@ import { FleetMonthlyUpdateForm } from './FleetMonthlyUpdateForm';
 import { FuelPlateCorrectionModal } from './FuelPlateCorrectionModal';
 import { getChecklistEffectiveStatus } from '../utils/complianceHelper';
 import { enrichFuelLogsWithConsumption, formatDatePtBr, formatNumberPtBr } from '../utils/fuelConsumptionHelper';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export const LeanModulesPortal: React.FC = () => {
   const {
@@ -112,6 +113,7 @@ export const LeanModulesPortal: React.FC = () => {
                 {lockedFarm}
               </span>
             )}
+            <PWAInstallButton compact />
             <button
               type="button"
               onClick={() => syncNow(true)}
