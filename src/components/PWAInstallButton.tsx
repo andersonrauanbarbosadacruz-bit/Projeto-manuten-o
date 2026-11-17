@@ -55,12 +55,12 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ compact = fa
               <div className="flex items-center space-x-3 min-w-0">
                 <img
                   src="/pwa-192x192.png"
-                  alt="el Ciruelo"
+                  alt="Gestão Manutenção"
                   className="w-11 h-11 rounded-xl bg-white p-0.5 object-contain shadow-sm shrink-0"
                 />
                 <div className="min-w-0">
                   <h3 className="text-sm sm:text-base font-extrabold leading-tight truncate">
-                    Instalar App el Ciruelo
+                    Instalar Gestão Manutenção
                   </h3>
                   <p className="text-[11px] text-emerald-200 truncate">
                     Acesso rápido em tela cheia · Android e iOS

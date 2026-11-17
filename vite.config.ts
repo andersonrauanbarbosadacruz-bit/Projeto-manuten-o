@@ -19,8 +19,8 @@ export default defineConfig(() => {
         ],
         manifest: {
           id: '/',
-          name: 'el Ciruelo - Gestão e Manutenção Operacional',
-          short_name: 'el Ciruelo',
+          name: 'Gestão Manutenção',
+          short_name: 'Gestão Manutenção',
           description:
             'Sistema de Checklist, Ordens de Serviço, Frota e Manutenção Operacional do Grupo el Ciruelo.',
           theme_color: '#065f46',
