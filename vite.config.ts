@@ -11,11 +11,13 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
+        useCredentials: true,
         includeAssets: [
           'apple-touch-icon.png',
-          'pwa-192x192.png',
-          'pwa-512x512.png',
-          'pwa-maskable-512x512.png',
+          'apple-touch-icon-v3.png',
+          'pwa-icon-192-v3.png',
+          'pwa-icon-512-v3.png',
+          'pwa-icon-maskable-512-v3.png',
         ],
         manifest: {
           id: '/',
@@ -30,19 +32,19 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: '/pwa-192x192.png',
+              src: '/pwa-icon-192-v3.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-512x512.png',
+              src: '/pwa-icon-512-v3.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-maskable-512x512.png',
+              src: '/pwa-icon-maskable-512-v3.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -50,10 +52,40 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff,woff2}'],
+          skipWaiting: true,
+          clientsClaim: true,
+          cleanupOutdatedCaches: true,
+          navigateFallback: null,
+          globPatterns: ['**/*.{js,css,ico,png,jpg,svg,woff,woff2}'],
+          globIgnores: ['**/index.html', '**/manifest.webmanifest'],
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
-          navigateFallbackDenylist: [/^\/api\//],
           runtimeCaching: [
+            {
+              urlPattern: ({request}) => request.mode === 'navigate',
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'html-pages-cache',
+                networkTimeoutSeconds: 3,
+                expiration: {
+                  maxEntries: 10,
+                  maxAgeSeconds: 60 * 60 * 24,
+                },
+                cacheableResponse: {
+                  statuses: [200],
+                },
+              },
+            },
+            {
+              urlPattern: /\/manifest\.webmanifest$/i,
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'manifest-cache',
+                networkTimeoutSeconds: 3,
+                cacheableResponse: {
+                  statuses: [200],
+                },
+              },
+            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',

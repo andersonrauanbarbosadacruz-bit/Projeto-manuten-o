@@ -1680,9 +1680,21 @@ app.post('/api/restore-item', (req, res) => {
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
 
-  // Ensure mobile browsers (Android Chrome / iOS Safari) never hold a stale cached index.html
+  // Ensure mobile browsers (Android Chrome / iOS Safari) never hold a stale cached index.html, SW, manifest, or unhashed icons
   app.use((req, res, next) => {
-    if (req.method === 'GET' && !req.path.startsWith('/api/') && !req.path.includes('.')) {
+    if (
+      req.method === 'GET' &&
+      !req.path.startsWith('/api/') &&
+      (
+        !req.path.includes('.') ||
+        req.path.endsWith('.html') ||
+        req.path.endsWith('/sw.js') ||
+        req.path.endsWith('/registerSW.js') ||
+        req.path.endsWith('/manifest.webmanifest') ||
+        req.path.includes('apple-touch-icon') ||
+        req.path.includes('pwa-')
+      )
+    ) {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
@@ -1702,14 +1714,24 @@ async function startServer() {
     // Serve static files in production
     const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath, {
+      cacheControl: false,
       setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('manifest.webmanifest')) {
-          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        } else {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
         }
       }
     }));
     app.get('*', (req, res) => {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      if (req.path.startsWith('/api/')) {
+        return res.status(404).json({ error: 'API route not found' });
+      }
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
